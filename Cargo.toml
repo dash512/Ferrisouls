@@ -1,0 +1,11 @@
+[package]
+name = "Ferrisouls"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libloading = "0.9.0"
+
+[lints.rust]
+unused = "allow"
+non_snake_case = "allow"
