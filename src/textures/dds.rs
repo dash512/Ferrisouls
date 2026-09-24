@@ -281,6 +281,9 @@ impl DDS {
                 data: Vec::<u8>::new(),
                 dcx_type: DCXType::Null
             }
+        )
+    }
+
     //write_to
 
 
