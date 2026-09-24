@@ -1,5 +1,5 @@
 
-use std::{ffi::c_void, path::Path};
+use std::{ffi::c_void, path::{Path, PathBuf}};
 use libloading::{Library, Symbol};
 use crate::common::dcx::DCXError;
 use crate::oodle::{bindings, enums, structs};
@@ -543,6 +543,19 @@ pub fn get_oodle(path: &Path) -> Result<OodleType, String> {
 
         _ => Err("Given file is not a valid Oodle library.".to_string()),
     }
+}
+
+pub fn find_oodle() -> Result<PathBuf, String> {
+    let paths: [&Path; 1] = [
+        Path::new("../oodle.dll") // TODO
+    ];
+
+    for p in paths {
+        if p.exists() {
+            return Ok(p.to_owned());
+        }
+    }
+    Err("Couldn't find Oodle".to_string())
 }
 
 

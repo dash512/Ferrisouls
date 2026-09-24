@@ -17,6 +17,13 @@ pub struct FormatInfo {
     texels_per_block: u8, // texels represented by one storage unit's width
 }
 
+impl FormatInfo {
+    ///Returns tuple of `(bits_per_texel, bytes_per_block, texels_per_block)`.
+    pub fn to_tuple(&self) -> (u8, u8, u8) {
+        (self.bits_per_texel, self.bytes_per_block, self.texels_per_block)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DxgiFormat {
     name: &'static str,

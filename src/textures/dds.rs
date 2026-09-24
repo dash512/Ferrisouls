@@ -93,10 +93,10 @@ mod other_enums {
 }
 
 
-struct DDSPixelFormat {
+pub struct DDSPixelFormat {
     size: u32, // asserted: 32
     flags: u32, // `DDPF` bit flags
-    fourcc: [u8; 4], // default=b"\0\0\0\0"
+    pub fourcc: [u8; 4], // default=b"\0\0\0\0"
     rgb_bit_count: u32,
     r_bitmask: u32,
     g_bitmask: u32,
@@ -167,17 +167,17 @@ impl DDSPixelFormat {
 }
 
 
-struct DDSHeader {
+pub struct DDSHeader {
     magic: [u8; 4], // bytes, asserted = b"DDS " rstrip_null
     size: u32, // asserted = 0x7C (124)
     flags: u32,
-    height: u32,
-    width: u32,
+    pub height: u32,
+    pub width: u32,
     pitch_or_linear_size: u32,
     depth: u32,
-    mipmap_count: u32,
+    pub mipmap_count: u32,
     reserved_1: [u8; 11], // unused; other programs sometimes write codes here like 'NVTT'
-    pixelformat: DDSPixelFormat, // offset 0x4C,
+    pub pixelformat: DDSPixelFormat, // offset 0x4C,
     caps1: u32, // `DDSCAPS` bit flags,
     caps2: u32, // `Self` bit flags,
     caps3: u32, // unused,
@@ -225,7 +225,7 @@ impl DDSHeader {
 }
 
 
-struct DX10Header {
+pub struct DX10Header {
     dxgi_format: u32, // dxgi::DxgiFormat.value
     resource_dimension: D3D10ResourceDimension,
     misc_flag: u32, // RESOURCE_MISC; used for cubemaps
@@ -243,6 +243,15 @@ impl DX10Header {
             alpha_mode: AlphaMode::UNKNOWN
         }
     }
+
+    pub fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let mut buffer = [0u8; 16]; // mem::size_of::<DX10Header>()
+        reader.read_exact(&mut buffer)?;
+
+        let header: DX10Header = unsafe { std::ptr::read(buffer.as_ptr() as *const _) };
+
+        Ok(header)
+    }
 }
 
 struct DDS {
@@ -252,4 +261,37 @@ struct DDS {
     dcx_type: DCXType
 }
 
+impl DDS {
+    pub fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let mut buffer = [0u8; 96]; // mem::size_of::<DDSHeader>()
+        reader.read_exact(&mut buffer)?;
 
+        let header: DDSHeader = DDSHeader::read_from(reader)?;
+
+        let dx10_header: Option<DX10Header> = if header.pixelformat.fourcc == *b"DX10" {
+            Some(DX10Header::read_from(reader)?)
+        } else {
+            None
+        };
+
+        Ok(
+            Self {
+                header: Some(header),
+                dx10_headerr: dx10_header,
+                data: Vec::<u8>::new(),
+                dcx_type: DCXType::Null
+            }
+    //write_to
+
+
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fih() {
+    }
+}

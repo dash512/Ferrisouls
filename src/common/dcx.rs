@@ -893,12 +893,12 @@ mod tests {
     fn test_compress() {
         let oodle = unsafe {
             get_oodle(Path::new(
-                r"C:\Users\lstr\Programming\DarkSoulsTextureStudio\oo2core_6_win64.dll"
+                "../tests/oo2core_6_win64.dll"
             ))
             .unwrap()
         };
 
-        let file = Path::new(r"C:\Users\lstr\Programming\01_common.sblytbnd.dcx");
+        let file = Path::new("../tests/01_common.sblytbnd.dcx");
         let mut f = File::open(file).unwrap();
         let mut empty = Vec::new();
         f.read_to_end(&mut empty);
@@ -909,6 +909,12 @@ mod tests {
 
         let new_result = Compress::raw(&result, DCXType::DCX_KRAK, &oodle).unwrap();
         println!("Successfully recompressed {:?} bytes", new_result.len());
+
+        /*
+        Successfully read 21123 bytes
+        Successfully decompressed 402623 bytes
+        Successfully recompressed 17851 bytes
+        */
     }
 
 }
