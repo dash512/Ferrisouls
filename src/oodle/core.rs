@@ -562,12 +562,4 @@ pub fn find_oodle() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn get_oodle_success() {
-        let path = Path::new(r"C:\Users\lstr\Programming\DarkSoulsTextureStudio\oo2core_6_win64.dll");
-
-        let o = get_oodle(path);
-        println!("{:?}", o)
-    }
 }
