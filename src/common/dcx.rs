@@ -850,7 +850,6 @@ impl Compress {
             },
         };
 
-        // TODO: Needs to:
         let vinfo = dcx_type.get_version_info().unwrap();
         let mut header = DCXHeaderStruct::new(
             vinfo.version1,
@@ -870,6 +869,10 @@ impl Compress {
         header.extend_from_slice(&mut compressed);
 
         Ok(header)
+        /*
+            TODO:
+            Split logic into trait functions for DCXType for readability instead of a match
+        */
     }
 
 }
