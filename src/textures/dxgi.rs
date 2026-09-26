@@ -11,16 +11,43 @@ impl fmt::Display for FormatNotFoundError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FormatInfo {
-    bits_per_texel: u8, // logical/storage bits per texel
-    bytes_per_block: u8, // bytes occupied by one storage unit
-    texels_per_block: u8, // texels represented by one storage unit's width
+pub enum FormatInfo {
+    Linear {
+        bits_per_texel: u8, // logical/storage bits per texel
+        bytes_per_texel: u8,
+    },
+
+    Packed {
+        bits_per_texel: u8, // logical/storage bits per texel
+        bytes_per_unit: u8,
+        texels_per_unit: u8,
+    },
+
+    BlockCompressed {
+        bits_per_texel: u8, // logical/storage bits per texel
+        bytes_per_block: u8, // bytes occupied by one storage unit
+        block_width: u8,
+        block_height: u8,
+    },
+
+    Planar // requires special implementation
 }
 
 impl FormatInfo {
     ///Returns tuple of `(bits_per_texel, bytes_per_block, texels_per_block)`.
-    pub fn to_tuple(&self) -> (u8, u8, u8) {
-        (self.bits_per_texel, self.bytes_per_block, self.texels_per_block)
+    pub fn to_tuple(&self) -> Result<(u8, u8, u8), &str> {
+        match self {
+            Self::Linear{bits_per_texel, bytes_per_texel} => {
+                Ok((*bits_per_texel, *bytes_per_texel, 1))
+            },
+            Self::Packed{bits_per_texel, bytes_per_unit, texels_per_unit} => {
+                Ok((*bits_per_texel, *bytes_per_unit, *texels_per_unit))
+            },
+            Self::BlockCompressed{bits_per_texel, bytes_per_block, block_width, block_height} => {
+                Ok((*bits_per_texel, *bytes_per_block, *block_width*block_height))
+            },
+            Self::Planar => Err("Planar types require specific implementation.")
+        }
     }
 }
 
@@ -39,818 +66,1216 @@ pub struct DxgiFormat {
 
 impl DxgiFormat {
     // type def start
-
     pub const UNKNOWN: DxgiFormat = DxgiFormat {
         name: "UNKNOWN",
         value: 0,
         description: "The format is not known.",
-        info: FormatInfo { bits_per_texel: 0, bytes_per_block: 0, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 0,
+            bytes_per_texel: 0,
+        },
     };
 
     pub const R32G32B32A32_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R32G32B32A32_TYPELESS",
         value: 1,
         description: "A four-component, 128-bit typeless format that supports 32 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 128, bytes_per_block: 16, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 128,
+            bytes_per_texel: 16,
+        },
     };
 
     pub const R32G32B32A32_FLOAT: DxgiFormat = DxgiFormat {
         name: "R32G32B32A32_FLOAT",
         value: 2,
         description: "A four-component, 128-bit floating-point format that supports 32 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 128, bytes_per_block: 16, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 128,
+            bytes_per_texel: 16,
+        },
     };
 
     pub const R32G32B32A32_UINT: DxgiFormat = DxgiFormat {
         name: "R32G32B32A32_UINT",
         value: 3,
         description: "A four-component, 128-bit unsigned-integer format that supports 32 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 128, bytes_per_block: 16, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 128,
+            bytes_per_texel: 16,
+        },
     };
 
     pub const R32G32B32A32_SINT: DxgiFormat = DxgiFormat {
         name: "R32G32B32A32_SINT",
         value: 4,
         description: "A four-component, 128-bit signed-integer format that supports 32 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 128, bytes_per_block: 16, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 128,
+            bytes_per_texel: 16,
+        },
     };
 
     pub const R32G32B32_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R32G32B32_TYPELESS",
         value: 5,
         description: "A three-component, 96-bit typeless format that supports 32 bits per color channel.",
-        info: FormatInfo { bits_per_texel: 96, bytes_per_block: 12, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 96,
+            bytes_per_texel: 12,
+        },
     };
 
     pub const R32G32B32_FLOAT: DxgiFormat = DxgiFormat {
         name: "R32G32B32_FLOAT",
         value: 6,
         description: "A three-component, 96-bit floating-point format that supports 32 bits per color channel.",
-        info: FormatInfo { bits_per_texel: 96, bytes_per_block: 12, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 96,
+            bytes_per_texel: 12,
+        },
     };
 
     pub const R32G32B32_UINT: DxgiFormat = DxgiFormat {
         name: "R32G32B32_UINT",
         value: 7,
         description: "A three-component, 96-bit unsigned-integer format that supports 32 bits per color channel.",
-        info: FormatInfo { bits_per_texel: 96, bytes_per_block: 12, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 96,
+            bytes_per_texel: 12,
+        },
     };
 
     pub const R32G32B32_SINT: DxgiFormat = DxgiFormat {
         name: "R32G32B32_SINT",
         value: 8,
         description: "A three-component, 96-bit signed-integer format that supports 32 bits per color channel.",
-        info: FormatInfo { bits_per_texel: 96, bytes_per_block: 12, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 96,
+            bytes_per_texel: 12,
+        },
     };
 
     pub const R16G16B16A16_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R16G16B16A16_TYPELESS",
         value: 9,
         description: "A four-component, 64-bit typeless format that supports 16 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R16G16B16A16_FLOAT: DxgiFormat = DxgiFormat {
         name: "R16G16B16A16_FLOAT",
         value: 10,
         description: "A four-component, 64-bit floating-point format that supports 16 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R16G16B16A16_UNORM: DxgiFormat = DxgiFormat {
         name: "R16G16B16A16_UNORM",
         value: 11,
         description: "A four-component, 64-bit unsigned-normalized-integer format that supports 16 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R16G16B16A16_UINT: DxgiFormat = DxgiFormat {
         name: "R16G16B16A16_UINT",
         value: 12,
         description: "A four-component, 64-bit unsigned-integer format that supports 16 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R16G16B16A16_SNORM: DxgiFormat = DxgiFormat {
         name: "R16G16B16A16_SNORM",
         value: 13,
         description: "A four-component, 64-bit signed-normalized-integer format that supports 16 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R16G16B16A16_SINT: DxgiFormat = DxgiFormat {
         name: "R16G16B16A16_SINT",
         value: 14,
         description: "A four-component, 64-bit signed-integer format that supports 16 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R32G32_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R32G32_TYPELESS",
         value: 15,
-        description: "A two-component, 64-bit typeless format that supports 32 bits for the red channel and 32 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        description: "A two-component, 64-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R32G32_FLOAT: DxgiFormat = DxgiFormat {
         name: "R32G32_FLOAT",
         value: 16,
-        description: "A two-component, 64-bit floating-point format that supports 32 bits for the red channel and 32 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        description: "A two-component, 64-bit floating-point format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R32G32_UINT: DxgiFormat = DxgiFormat {
         name: "R32G32_UINT",
         value: 17,
-        description: "A two-component, 64-bit unsigned-integer format that supports 32 bits for the red channel and 32 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        description: "A two-component, 64-bit unsigned-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R32G32_SINT: DxgiFormat = DxgiFormat {
         name: "R32G32_SINT",
         value: 18,
-        description: "A two-component, 64-bit signed-integer format that supports 32 bits for the red channel and 32 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        description: "A two-component, 64-bit signed-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R32G8X24_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R32G8X24_TYPELESS",
         value: 19,
-        description: "A two-component, 64-bit typeless format that supports 32 bits for the red channel, 8 bits for the green channel, and 24 bits are unused.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        description: "A two-component, 64-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const D32_FLOAT_S8X24_UINT: DxgiFormat = DxgiFormat {
         name: "D32_FLOAT_S8X24_UINT",
         value: 20,
-        description: "A 32-bit floating-point component, and two unsigned-integer components with an additional 32 bits. This format supports 32-bit depth, 8-bit stencil, and 24 bits are unused.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        description: "A 32-bit depth, 8-bit stencil format with 24 unused bits.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R32_FLOAT_X8X24_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R32_FLOAT_X8X24_TYPELESS",
         value: 21,
-        description: "A 32-bit floating-point component, and two typeless components with an additional 32 bits. This format supports a 32-bit red channel, 8 bits are unused, and 24 bits are unused.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        description: "A 32-bit red channel with 8 unused bits and 24 additional unused bits.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const X32_TYPELESS_G8X24_UINT: DxgiFormat = DxgiFormat {
         name: "X32_TYPELESS_G8X24_UINT",
         value: 22,
-        description: "A 32-bit typeless component, and two unsigned-integer components with an additional 32 bits. This format has 32 bits unused, 8 bits for the green channel, and 24 bits are unused.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        description: "A typeless 32-bit component and 8-bit unsigned-integer component with 24 unused bits.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
     pub const R10G10B10A2_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R10G10B10A2_TYPELESS",
         value: 23,
-        description: "A four-component, 32-bit typeless format that supports 10 bits for each color and 2 bits for alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R10G10B10A2_UNORM: DxgiFormat = DxgiFormat {
         name: "R10G10B10A2_UNORM",
         value: 24,
-        description: "A four-component, 32-bit unsigned-normalized-integer format that supports 10 bits for each color and 2 bits for alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit unsigned-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R10G10B10A2_UINT: DxgiFormat = DxgiFormat {
         name: "R10G10B10A2_UINT",
         value: 25,
-        description: "A four-component, 32-bit unsigned-integer format that supports 10 bits for each color and 2 bits for alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit unsigned-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R11G11B10_FLOAT: DxgiFormat = DxgiFormat {
         name: "R11G11B10_FLOAT",
         value: 26,
-        description: "Three partial-precision floating-point numbers encoded into a single 32-bit value.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "Three partial-precision floating-point numbers encoded into one 32-bit value.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R8G8B8A8_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R8G8B8A8_TYPELESS",
         value: 27,
-        description: "A four-component, 32-bit typeless format that supports 8 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R8G8B8A8_UNORM: DxgiFormat = DxgiFormat {
         name: "R8G8B8A8_UNORM",
         value: 28,
-        description: "A four-component, 32-bit unsigned-normalized-integer format that supports 8 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit unsigned-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R8G8B8A8_UNORM_SRGB: DxgiFormat = DxgiFormat {
         name: "R8G8B8A8_UNORM_SRGB",
         value: 29,
-        description: "A four-component, 32-bit unsigned-normalized integer sRGB format that supports 8 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit unsigned-normalized sRGB format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R8G8B8A8_UINT: DxgiFormat = DxgiFormat {
         name: "R8G8B8A8_UINT",
         value: 30,
-        description: "A four-component, 32-bit unsigned-integer format that supports 8 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit unsigned-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R8G8B8A8_SNORM: DxgiFormat = DxgiFormat {
         name: "R8G8B8A8_SNORM",
         value: 31,
-        description: "A four-component, 32-bit signed-normalized-integer format that supports 8 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit signed-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R8G8B8A8_SINT: DxgiFormat = DxgiFormat {
         name: "R8G8B8A8_SINT",
         value: 32,
-        description: "A four-component, 32-bit signed-integer format that supports 8 bits per channel including alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit signed-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R16G16_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R16G16_TYPELESS",
         value: 33,
-        description: "A two-component, 32-bit typeless format that supports 16 bits for the red channel and 16 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A two-component, 32-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R16G16_FLOAT: DxgiFormat = DxgiFormat {
         name: "R16G16_FLOAT",
         value: 34,
-        description: "A two-component, 32-bit floating-point format that supports 16 bits for the red channel and 16 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A two-component, 32-bit floating-point format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R16G16_UNORM: DxgiFormat = DxgiFormat {
         name: "R16G16_UNORM",
         value: 35,
-        description: "A two-component, 32-bit unsigned-normalized-integer format that supports 16 bits each for the green and red channels.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A two-component, 32-bit unsigned-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R16G16_UINT: DxgiFormat = DxgiFormat {
         name: "R16G16_UINT",
         value: 36,
-        description: "A two-component, 32-bit unsigned-integer format that supports 16 bits for the red channel and 16 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A two-component, 32-bit unsigned-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R16G16_SNORM: DxgiFormat = DxgiFormat {
         name: "R16G16_SNORM",
         value: 37,
-        description: "A two-component, 32-bit signed-normalized-integer format that supports 16 bits for the red channel and 16 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A two-component, 32-bit signed-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R16G16_SINT: DxgiFormat = DxgiFormat {
         name: "R16G16_SINT",
         value: 38,
-        description: "A two-component, 32-bit signed-integer format that supports 16 bits for the red channel and 16 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A two-component, 32-bit signed-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R32_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R32_TYPELESS",
         value: 39,
-        description: "A single-component, 32-bit typeless format that supports 32 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A single-component, 32-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const D32_FLOAT: DxgiFormat = DxgiFormat {
         name: "D32_FLOAT",
         value: 40,
-        description: "A single-component, 32-bit floating-point format that supports 32 bits for depth.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A single-component, 32-bit floating-point depth format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R32_FLOAT: DxgiFormat = DxgiFormat {
         name: "R32_FLOAT",
         value: 41,
-        description: "A single-component, 32-bit floating-point format that supports 32 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A single-component, 32-bit floating-point format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R32_UINT: DxgiFormat = DxgiFormat {
         name: "R32_UINT",
         value: 42,
-        description: "A single-component, 32-bit unsigned-integer format that supports 32 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A single-component, 32-bit unsigned-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R32_SINT: DxgiFormat = DxgiFormat {
         name: "R32_SINT",
         value: 43,
-        description: "A single-component, 32-bit signed-integer format that supports 32 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A single-component, 32-bit signed-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R24G8_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R24G8_TYPELESS",
         value: 44,
-        description: "A two-component, 32-bit typeless format that supports 24 bits for the red channel and 8 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A two-component, 32-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const D24_UNORM_S8_UINT: DxgiFormat = DxgiFormat {
         name: "D24_UNORM_S8_UINT",
         value: 45,
-        description: "A 32-bit z-buffer format that supports 24 bits for depth and 8 bits for stencil.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A 24-bit depth and 8-bit stencil format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R24_UNORM_X8_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R24_UNORM_X8_TYPELESS",
         value: 46,
-        description: "A 32-bit format containing a 24-bit single-component unsigned-normalized integer and an additional typeless 8 bits.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A 24-bit unsigned-normalized component with 8 additional typeless bits.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const X24_TYPELESS_G8_UINT: DxgiFormat = DxgiFormat {
         name: "X24_TYPELESS_G8_UINT",
         value: 47,
-        description: "A 32-bit format containing a 24-bit typeless component and an additional 8-bit unsigned-integer component.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A 24-bit typeless component with an additional 8-bit unsigned-integer component.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R8G8_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R8G8_TYPELESS",
         value: 48,
-        description: "A two-component, 16-bit typeless format that supports 8 bits for the red channel and 8 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A two-component, 16-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R8G8_UNORM: DxgiFormat = DxgiFormat {
         name: "R8G8_UNORM",
         value: 49,
-        description: "A two-component, 16-bit unsigned-normalized-integer format that supports 8 bits for the red channel and 8 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A two-component, 16-bit unsigned-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R8G8_UINT: DxgiFormat = DxgiFormat {
         name: "R8G8_UINT",
         value: 50,
-        description: "A two-component, 16-bit unsigned-integer format that supports 8 bits for the red channel and 8 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A two-component, 16-bit unsigned-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R8G8_SNORM: DxgiFormat = DxgiFormat {
         name: "R8G8_SNORM",
         value: 51,
-        description: "A two-component, 16-bit signed-normalized-integer format that supports 8 bits for the red channel and 8 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A two-component, 16-bit signed-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R8G8_SINT: DxgiFormat = DxgiFormat {
         name: "R8G8_SINT",
         value: 52,
-        description: "A two-component, 16-bit signed-integer format that supports 8 bits for the red channel and 8 bits for the green channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A two-component, 16-bit signed-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R16_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R16_TYPELESS",
         value: 53,
-        description: "A single-component, 16-bit typeless format that supports 16 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A single-component, 16-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R16_FLOAT: DxgiFormat = DxgiFormat {
         name: "R16_FLOAT",
         value: 54,
-        description: "A single-component, 16-bit floating-point format that supports 16 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A single-component, 16-bit floating-point format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const D16_UNORM: DxgiFormat = DxgiFormat {
         name: "D16_UNORM",
         value: 55,
-        description: "A single-component, 16-bit unsigned-normalized-integer format that supports 16 bits for depth.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A single-component, 16-bit unsigned-normalized depth format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R16_UNORM: DxgiFormat = DxgiFormat {
         name: "R16_UNORM",
         value: 56,
-        description: "A single-component, 16-bit unsigned-normalized-integer format that supports 16 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A single-component, 16-bit unsigned-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R16_UINT: DxgiFormat = DxgiFormat {
         name: "R16_UINT",
         value: 57,
-        description: "A single-component, 16-bit unsigned-integer format that supports 16 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A single-component, 16-bit unsigned-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R16_SNORM: DxgiFormat = DxgiFormat {
         name: "R16_SNORM",
         value: 58,
-        description: "A single-component, 16-bit signed-normalized-integer format that supports 16 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A single-component, 16-bit signed-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R16_SINT: DxgiFormat = DxgiFormat {
         name: "R16_SINT",
         value: 59,
-        description: "A single-component, 16-bit signed-integer format that supports 16 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A single-component, 16-bit signed-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const R8_TYPELESS: DxgiFormat = DxgiFormat {
         name: "R8_TYPELESS",
         value: 60,
-        description: "A single-component, 8-bit typeless format that supports 8 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 1, texels_per_block: 1 }
+        description: "A single-component, 8-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 8,
+            bytes_per_texel: 1,
+        },
     };
 
     pub const R8_UNORM: DxgiFormat = DxgiFormat {
         name: "R8_UNORM",
         value: 61,
-        description: "A single-component, 8-bit unsigned-normalized-integer format that supports 8 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 1, texels_per_block: 1 }
+        description: "A single-component, 8-bit unsigned-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 8,
+            bytes_per_texel: 1,
+        },
     };
 
     pub const R8_UINT: DxgiFormat = DxgiFormat {
         name: "R8_UINT",
         value: 62,
-        description: "A single-component, 8-bit unsigned-integer format that supports 8 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 1, texels_per_block: 1 }
+        description: "A single-component, 8-bit unsigned-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 8,
+            bytes_per_texel: 1,
+        },
     };
 
     pub const R8_SNORM: DxgiFormat = DxgiFormat {
         name: "R8_SNORM",
         value: 63,
-        description: "A single-component, 8-bit signed-normalized-integer format that supports 8 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 1, texels_per_block: 1 }
+        description: "A single-component, 8-bit signed-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 8,
+            bytes_per_texel: 1,
+        },
     };
 
     pub const R8_SINT: DxgiFormat = DxgiFormat {
         name: "R8_SINT",
         value: 64,
-        description: "A single-component, 8-bit signed-integer format that supports 8 bits for the red channel.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 1, texels_per_block: 1 }
+        description: "A single-component, 8-bit signed-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 8,
+            bytes_per_texel: 1,
+        },
     };
 
     pub const A8_UNORM: DxgiFormat = DxgiFormat {
         name: "A8_UNORM",
         value: 65,
-        description: "A single-component, 8-bit unsigned-normalized-integer format for alpha only.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 1, texels_per_block: 1 }
+        description: "A single-component, 8-bit unsigned-normalized alpha format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 8,
+            bytes_per_texel: 1,
+        },
     };
 
+    // Special handling: each byte stores 8 logical texels.
     pub const R1_UNORM: DxgiFormat = DxgiFormat {
         name: "R1_UNORM",
         value: 66,
-        description: "A single-component, 1-bit unsigned-normalized integer format that supports 1 bit for the red channel.",
-        info: FormatInfo { bits_per_texel: 1, bytes_per_block: 1, texels_per_block: 8 }
+        description: "A single-component, 1-bit unsigned-normalized integer format.",
+        info: FormatInfo::Packed {
+            bits_per_texel: 1,
+            bytes_per_unit: 1,
+            texels_per_unit: 8,
+        },
     };
 
     pub const R9G9B9E5_SHAREDEXP: DxgiFormat = DxgiFormat {
         name: "R9G9B9E5_SHAREDEXP",
         value: 67,
-        description: "Three partial-precision floating-point numbers encoded into a single 32-bit value, all sharing the same 5-bit exponent.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "Three partial-precision floating-point numbers encoded into one 32-bit value.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
+    // Special handling: packed format, one 32-bit unit contains 2 texels.
     pub const R8G8_B8G8_UNORM: DxgiFormat = DxgiFormat {
         name: "R8G8_B8G8_UNORM",
         value: 68,
-        description: "A four-component, 32-bit unsigned-normalized-integer packed RGB format. Each 32-bit block describes a pair of pixels.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 4, texels_per_block: 2 }
+        description: "A packed 32-bit format where each unit describes a pair of pixels.",
+        info: FormatInfo::Packed {
+            bits_per_texel: 16,
+            bytes_per_unit: 4,
+            texels_per_unit: 2,
+        },
     };
 
+    // Special handling: packed format, one 32-bit unit contains 2 texels.
     pub const G8R8_G8B8_UNORM: DxgiFormat = DxgiFormat {
         name: "G8R8_G8B8_UNORM",
         value: 69,
-        description: "A four-component, 32-bit unsigned-normalized-integer packed RGB format. Each 32-bit block describes a pair of pixels.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 4, texels_per_block: 2 }
+        description: "A packed 32-bit format where each unit describes a pair of pixels.",
+        info: FormatInfo::Packed {
+            bits_per_texel: 16,
+            bytes_per_unit: 4,
+            texels_per_unit: 2,
+        },
     };
 
+    // BC formats: dimensions are in 4x4 logical texel blocks.
     pub const BC1_TYPELESS: DxgiFormat = DxgiFormat {
         name: "BC1_TYPELESS",
         value: 70,
         description: "Four-component typeless block-compression format.",
-        info: FormatInfo { bits_per_texel: 4, bytes_per_block: 8, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 4,
+            bytes_per_block: 8,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC1_UNORM: DxgiFormat = DxgiFormat {
         name: "BC1_UNORM",
         value: 71,
         description: "Four-component block-compression format.",
-        info: FormatInfo { bits_per_texel: 4, bytes_per_block: 8, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 4,
+            bytes_per_block: 8,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC1_UNORM_SRGB: DxgiFormat = DxgiFormat {
         name: "BC1_UNORM_SRGB",
         value: 72,
         description: "Four-component block-compression format for sRGB data.",
-        info: FormatInfo { bits_per_texel: 4, bytes_per_block: 8, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 4,
+            bytes_per_block: 8,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC2_TYPELESS: DxgiFormat = DxgiFormat {
         name: "BC2_TYPELESS",
         value: 73,
         description: "Four-component typeless block-compression format.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC2_UNORM: DxgiFormat = DxgiFormat {
         name: "BC2_UNORM",
         value: 74,
         description: "Four-component block-compression format.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC2_UNORM_SRGB: DxgiFormat = DxgiFormat {
         name: "BC2_UNORM_SRGB",
         value: 75,
         description: "Four-component block-compression format for sRGB data.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC3_TYPELESS: DxgiFormat = DxgiFormat {
         name: "BC3_TYPELESS",
         value: 76,
         description: "Four-component typeless block-compression format.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC3_UNORM: DxgiFormat = DxgiFormat {
         name: "BC3_UNORM",
         value: 77,
         description: "Four-component block-compression format.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC3_UNORM_SRGB: DxgiFormat = DxgiFormat {
         name: "BC3_UNORM_SRGB",
         value: 78,
         description: "Four-component block-compression format for sRGB data.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC4_TYPELESS: DxgiFormat = DxgiFormat {
         name: "BC4_TYPELESS",
         value: 79,
         description: "One-component typeless block-compression format.",
-        info: FormatInfo { bits_per_texel: 4, bytes_per_block: 8, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 4,
+            bytes_per_block: 8,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC4_UNORM: DxgiFormat = DxgiFormat {
         name: "BC4_UNORM",
         value: 80,
         description: "One-component block-compression format.",
-        info: FormatInfo { bits_per_texel: 4, bytes_per_block: 8, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 4,
+            bytes_per_block: 8,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC4_SNORM: DxgiFormat = DxgiFormat {
         name: "BC4_SNORM",
         value: 81,
         description: "One-component block-compression format.",
-        info: FormatInfo { bits_per_texel: 4, bytes_per_block: 8, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 4,
+            bytes_per_block: 8,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC5_TYPELESS: DxgiFormat = DxgiFormat {
         name: "BC5_TYPELESS",
         value: 82,
         description: "Two-component typeless block-compression format.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC5_UNORM: DxgiFormat = DxgiFormat {
         name: "BC5_UNORM",
         value: 83,
         description: "Two-component block-compression format.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC5_SNORM: DxgiFormat = DxgiFormat {
         name: "BC5_SNORM",
         value: 84,
         description: "Two-component block-compression format.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const B5G6R5_UNORM: DxgiFormat = DxgiFormat {
         name: "B5G6R5_UNORM",
         value: 85,
-        description: "A three-component, 16-bit unsigned-normalized-integer format that supports 5 bits for blue, 6 bits for green, and 5 bits for red.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A 16-bit unsigned-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const B5G5R5A1_UNORM: DxgiFormat = DxgiFormat {
         name: "B5G5R5A1_UNORM",
         value: 86,
-        description: "A four-component, 16-bit unsigned-normalized-integer format that supports 5 bits for each color channel and 1-bit alpha.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A 16-bit unsigned-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const B8G8R8A8_UNORM: DxgiFormat = DxgiFormat {
         name: "B8G8R8A8_UNORM",
         value: 87,
-        description: "A four-component, 32-bit unsigned-normalized-integer format that supports 8 bits for each color channel and 8-bit alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit unsigned-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const B8G8R8X8_UNORM: DxgiFormat = DxgiFormat {
         name: "B8G8R8X8_UNORM",
         value: 88,
-        description: "A four-component, 32-bit unsigned-normalized-integer format that supports 8 bits for each color channel and 8 bits unused.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit unsigned-normalized-integer format with one unused component.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const R10G10B10_XR_BIAS_A2_UNORM: DxgiFormat = DxgiFormat {
         name: "R10G10B10_XR_BIAS_A2_UNORM",
         value: 89,
-        description: "A four-component, 32-bit 2.8-biased fixed-point format that supports 10 bits for each color channel and 2-bit alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit 2.8-biased fixed-point format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const B8G8R8A8_TYPELESS: DxgiFormat = DxgiFormat {
         name: "B8G8R8A8_TYPELESS",
         value: 90,
-        description: "A four-component, 32-bit typeless format that supports 8 bits for each channel including alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit typeless format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const B8G8R8A8_UNORM_SRGB: DxgiFormat = DxgiFormat {
         name: "B8G8R8A8_UNORM_SRGB",
         value: 91,
-        description: "A four-component, 32-bit unsigned-normalized standard RGB format that supports 8 bits for each channel including alpha.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit unsigned-normalized sRGB format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const B8G8R8X8_TYPELESS: DxgiFormat = DxgiFormat {
         name: "B8G8R8X8_TYPELESS",
         value: 92,
-        description: "A four-component, 32-bit typeless format that supports 8 bits for each color channel, and 8 bits are unused.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit typeless format with one unused component.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const B8G8R8X8_UNORM_SRGB: DxgiFormat = DxgiFormat {
         name: "B8G8R8X8_UNORM_SRGB",
         value: 93,
-        description: "A four-component, 32-bit unsigned-normalized standard RGB format that supports 8 bits for each color channel, with 8 bits unused.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        description: "A four-component, 32-bit unsigned-normalized sRGB format with one unused component.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const BC6H_TYPELESS: DxgiFormat = DxgiFormat {
         name: "BC6H_TYPELESS",
         value: 94,
         description: "A typeless block-compression format.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC6H_UF16: DxgiFormat = DxgiFormat {
         name: "BC6H_UF16",
         value: 95,
         description: "A block-compression format using unsigned floating-point data.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC6H_SF16: DxgiFormat = DxgiFormat {
         name: "BC6H_SF16",
         value: 96,
         description: "A block-compression format using signed floating-point data.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC7_TYPELESS: DxgiFormat = DxgiFormat {
         name: "BC7_TYPELESS",
         value: 97,
         description: "A typeless block-compression format.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC7_UNORM: DxgiFormat = DxgiFormat {
         name: "BC7_UNORM",
         value: 98,
         description: "A block-compression format.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const BC7_UNORM_SRGB: DxgiFormat = DxgiFormat {
         name: "BC7_UNORM_SRGB",
         value: 99,
         description: "A block-compression format for sRGB data.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 }
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
     };
 
     pub const AYUV: DxgiFormat = DxgiFormat {
         name: "AYUV",
         value: 100,
         description: "Most common YUV 4:4:4 video resource format.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const Y410: DxgiFormat = DxgiFormat {
         name: "Y410",
         value: 101,
         description: "10-bit per channel packed YUV 4:4:4 video resource format.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 4, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 32,
+            bytes_per_texel: 4,
+        },
     };
 
     pub const Y416: DxgiFormat = DxgiFormat {
         name: "Y416",
         value: 102,
         description: "16-bit per channel packed YUV 4:4:4 video resource format.",
-        info: FormatInfo { bits_per_texel: 64, bytes_per_block: 8, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 64,
+            bytes_per_texel: 8,
+        },
     };
 
+    // Special handling: planar YUV 4:2:0 layout.
     pub const NV12: DxgiFormat = DxgiFormat {
         name: "NV12",
         value: 103,
         description: "Most common YUV 4:2:0 video resource format.",
-        info: FormatInfo { bits_per_texel: 12, bytes_per_block: 6, texels_per_block: 2 }
+        info: FormatInfo::Planar,
     };
 
+    // Special handling: planar YUV 4:2:0 layout.
     pub const P010: DxgiFormat = DxgiFormat {
         name: "P010",
         value: 104,
-        description: "10-bit per channel planar YUV 4:2:0 video resource format. Each component uses 16 bits of storage.",
-        info: FormatInfo { bits_per_texel: 24, bytes_per_block: 12, texels_per_block: 2 }
+        description: "10-bit per channel planar YUV 4:2:0 video resource format.",
+        info: FormatInfo::Planar,
     };
 
+    // Special handling: planar YUV 4:2:0 layout.
     pub const P016: DxgiFormat = DxgiFormat {
         name: "P016",
         value: 105,
         description: "16-bit per channel planar YUV 4:2:0 video resource format.",
-        info: FormatInfo { bits_per_texel: 24, bytes_per_block: 12, texels_per_block: 2 }
+        info: FormatInfo::Planar,
     };
 
+    // Special handling: implementation-defined planar YUV 4:2:0 layout.
     pub const FORMAT_420_OPAQUE: DxgiFormat = DxgiFormat {
         name: "420_OPAQUE",
         value: 106,
         description: "8-bit per channel planar YUV 4:2:0 video resource format with an opaque implementation-defined layout.",
-        info: FormatInfo { bits_per_texel: 12, bytes_per_block: 6, texels_per_block: 2 }
+        info: FormatInfo::Planar,
     };
 
+    // Special handling: packed YUV 4:2:2, 2 texels per storage unit.
     pub const YUY2: DxgiFormat = DxgiFormat {
         name: "YUY2",
         value: 107,
         description: "Most common YUV 4:2:2 video resource format.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 4, texels_per_block: 2 }
+        info: FormatInfo::Packed {
+            bits_per_texel: 16,
+            bytes_per_unit: 4,
+            texels_per_unit: 2,
+        },
     };
 
+    // Special handling: packed YUV 4:2:2, 2 texels per storage unit.
     pub const Y210: DxgiFormat = DxgiFormat {
         name: "Y210",
         value: 108,
-        description: "10-bit per channel packed YUV 4:2:2 video resource format. Each component uses 16 bits of storage.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 8, texels_per_block: 2 }
+        description: "10-bit per channel packed YUV 4:2:2 video resource format.",
+        info: FormatInfo::Packed {
+            bits_per_texel: 32,
+            bytes_per_unit: 8,
+            texels_per_unit: 2,
+        },
     };
 
+    // Special handling: packed YUV 4:2:2, 2 texels per storage unit.
     pub const Y216: DxgiFormat = DxgiFormat {
         name: "Y216",
         value: 109,
         description: "16-bit per channel packed YUV 4:2:2 video resource format.",
-        info: FormatInfo { bits_per_texel: 32, bytes_per_block: 8, texels_per_block: 2 }
+        info: FormatInfo::Packed {
+            bits_per_texel: 32,
+            bytes_per_unit: 8,
+            texels_per_unit: 2,
+        },
     };
 
+    // Special handling: planar YUV 4:1:1 layout.
     pub const NV11: DxgiFormat = DxgiFormat {
         name: "NV11",
         value: 110,
         description: "Most common planar YUV 4:1:1 video resource format.",
-        info: FormatInfo { bits_per_texel: 12, bytes_per_block: 6, texels_per_block: 4 }
+        info: FormatInfo::Planar,
     };
 
+    // Special handling may be required for palette interpretation.
     pub const AI44: DxgiFormat = DxgiFormat {
         name: "AI44",
         value: 111,
         description: "4-bit palletized YUV format commonly used for DVD subpicture.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 1, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 8,
+            bytes_per_texel: 1,
+        },
     };
 
+    // Special handling may be required for palette interpretation.
     pub const IA44: DxgiFormat = DxgiFormat {
         name: "IA44",
         value: 112,
         description: "4-bit palletized YUV format commonly used for DVD subpicture.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 1, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 8,
+            bytes_per_texel: 1,
+        },
     };
 
+    // Special handling may be required for palette interpretation.
     pub const P8: DxgiFormat = DxgiFormat {
         name: "P8",
         value: 113,
         description: "8-bit palletized format used for palletized RGB and YUV data.",
-        info: FormatInfo { bits_per_texel: 8, bytes_per_block: 1, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 8,
+            bytes_per_texel: 1,
+        },
     };
 
+    // Special handling may be required for palette interpretation.
     pub const A8P8: DxgiFormat = DxgiFormat {
         name: "A8P8",
         value: 114,
         description: "8-bit palletized format with 8 bits of alpha.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
 
     pub const B4G4R4A4_UNORM: DxgiFormat = DxgiFormat {
         name: "B4G4R4A4_UNORM",
         value: 115,
-        description: "A four-component, 16-bit unsigned-normalized integer format that supports 4 bits for each channel including alpha.",
-        info: FormatInfo { bits_per_texel: 16, bytes_per_block: 2, texels_per_block: 1 }
+        description: "A four-component, 16-bit unsigned-normalized-integer format.",
+        info: FormatInfo::Linear {
+            bits_per_texel: 16,
+            bytes_per_texel: 2,
+        },
     };
+
+    // type def end
 
     pub const DXGI_FORMATS: &[DxgiFormat] = &[
         Self::UNKNOWN,
@@ -971,7 +1396,6 @@ impl DxgiFormat {
         Self::B4G4R4A4_UNORM,
     ];
 
-    // type def end
 
     pub fn name(&self) -> &str {
         self.name
@@ -1047,7 +1471,7 @@ use super::*;
         let format = DxgiFormat::from_tpftexture_id(106)?;
         assert_eq!(format.id(), 98);
         assert_eq!(format.name(), "BC7_UNORM");
-        assert_eq!(format.info(), FormatInfo { bits_per_texel: 8, bytes_per_block: 16, texels_per_block: 4 });
+        assert_eq!(format.info(), FormatInfo::BlockCompressed { bits_per_texel: 8, bytes_per_block: 16, block_width: 4, block_height: 4 });
         return Ok(());
     }
 }
