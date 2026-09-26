@@ -6,7 +6,7 @@ pub trait MortonAlgorithms {
     ///Decodes a linear Morton index into its corresponding block coordinates inside the tile. 
     ///  
     ///For example: 0 -> (0, 0) || 1 -> (1, 0) || 2 -> (0, 1) || 3 -> (1, 1) || 4 -> (2, 0) || ...
-    fn encode(x: u32, y: u32) -> u32 {
+    fn encode(x: usize, y: usize) -> usize {
         let mut result = 0;
 
         for bit in 0..16 {
@@ -18,7 +18,7 @@ pub trait MortonAlgorithms {
     }
 
     ///Reverse decode. Converts (x, y) block coordinates to a Z-order index.
-    fn decode(i: u32) -> (u32, u32) {
+    fn decode(i: usize) -> (usize, usize) {
         let mut x = 0;
         let mut y = 0;
 
@@ -92,6 +92,11 @@ pub trait MortonAlgorithms {
 
 pub struct Morton;
 impl MortonAlgorithms for Morton {}
+impl Morton {
+    pub fn iter(from: usize, to: usize) -> impl Iterator<Item = (usize, usize)> {
+        (from..to).map(|x| Self::decode(x))
+    }
+}
 
 ///Optimized morton implementation for 8x8 tiles as used in Bloodborne textures.
 pub struct Morton8;
@@ -100,8 +105,8 @@ impl MortonAlgorithms for Morton8 {
     ///
     /// `i` must be in the range `0..64`.
     #[inline]
-    fn decode(i: u32) -> (u32, u32) {
-        fn compact1by1(mut n: u32) -> u32 {
+    fn decode(i: usize) -> (usize, usize) {
+        fn compact1by1(mut n: usize) -> usize {
             n &= 0x55;
             n = (n ^ (n >> 1)) & 0x33;
             n = (n ^ (n >> 2)) & 0x0F;
@@ -115,8 +120,8 @@ impl MortonAlgorithms for Morton8 {
     ///
     /// `x` and `y` must be in the range `0..8`.
     #[inline]
-    fn encode(x: u32, y: u32) -> u32 {
-        fn part1by1(mut n: u32) -> u32 {
+    fn encode(x: usize, y: usize) -> usize {
+        fn part1by1(mut n: usize) -> usize {
             n &= 0x07;
             n = (n | (n << 2)) & 0x33;
             n = (n | (n << 1)) & 0x55;
@@ -128,7 +133,7 @@ impl MortonAlgorithms for Morton8 {
 
     #[inline]
     fn index(t: usize, sx: usize, sy: usize) -> usize {
-        let (x, y) = Self::decode(t as u32);
+        let (x, y) = Self::decode(t as usize);
         y as usize * sx + x as usize
     }
 
@@ -137,10 +142,16 @@ impl MortonAlgorithms for Morton8 {
         let x = i % sx;
         let y = i / sx;
 
-        Self::encode(x as u32, y as u32) as usize
+        Self::encode(x as usize, y as usize) as usize
     }
-
 }
+impl Morton8 {
+    pub fn iter() -> impl Iterator<Item = (usize, usize)> {
+        (0usize..63usize).map(|x| Self::decode(x))
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
