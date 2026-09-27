@@ -1,14 +1,4 @@
-use std::fmt;
-use std::error::Error;
-
-#[derive(Debug, Clone)]
-pub struct FormatNotFoundError;
-impl Error for FormatNotFoundError {}
-impl fmt::Display for FormatNotFoundError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "DXGI Format not found!")
-    }
-}
+use crate::errors::FormatNotFoundError;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FormatInfo {
@@ -1455,9 +1445,7 @@ impl DxgiFormat {
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-
-use super::*;
+    use super::*;
 
     #[test]
     fn test_id_get_works() -> Result<(), FormatNotFoundError> {

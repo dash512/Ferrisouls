@@ -6,33 +6,94 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::fs::{File};
 
+use crate::errors::{FerrisoulsError, BinaryReaderError, DCXError};
 use crate::oodle::core::{Oodle, Oodle26, Oodle28, Oodle29, OodleType};
+use crate::{binary::read::{BinaryReader, ReadFrom}};
+use crate::common::bytes::ByteOrder;
 use header_structs::*;
 
-#[derive(Debug, Clone)]
-pub struct DCXError {
-    msg: String,
-}
-
-impl DCXError {
-    pub fn new(msg: impl Into<String>) -> Self {
-        Self { msg: msg.into() }
-    }
-}
-
-impl Error for DCXError {}
-
-impl fmt::Display for DCXError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.msg)
-    }
-}
-
 pub mod header_structs {
-    use std::{fs::File, os::windows::fs::FileExt};
+    use super::*;
+     
+    pub struct DCXVersionInfo {
+        pub compression_type: [u8; 4],
+        pub version1: u32,
+        pub version2: u32,
+        pub version3: Option<u32>, // not constant for `DCX_EDGE`
+        pub compression_level: Option<u8>, // not constant for `DCX_ZSTD`
+        pub version5: u32,
+        pub version6: u32,
+        pub version7: u32,
+    }
+    impl PartialEq for DCXVersionInfo {
+        fn eq(&self, other: &Self) -> bool {
+            if self.compression_type != other.compression_type {
+                return false;
+            }
+            if self.version1 != other.version1 {
+                return false;
+            }
+            if self.version2 != other.version2 {
+                return false;
+            }
 
-    use crate::common::bytes::ByteOrder;
-    use super::{DCXVersionInfo, DCXError, Path};
+            if let (Some(a), Some(b)) = (self.version3, other.version3) {
+                if a != b {
+                    return false;
+                }
+            }
+
+            if let (Some(a), Some(b)) = (self.compression_level, other.compression_level) {
+                if a != b {
+                    return false;
+                }
+            }
+
+            if self.version5 != other.version5 {
+                return false;
+            }
+            if self.version6 != other.version6 {
+                return false;
+            }
+            if self.version7 != other.version7 {
+                return false;
+            }
+
+            true
+        }
+    }
+    impl Hash for DCXVersionInfo {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            "DCXVersionInfo".hash(state);
+        }
+    }
+    //Debug implementation to format integers into hex strings
+    impl fmt::Debug for DCXVersionInfo {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let mut debug = f.debug_struct("DCXVersionInfo");
+            
+            debug.field("compression_type", &format_args!("{}", String::from_utf8_lossy(&self.compression_type)));
+            debug.field("version1", &format_args!("{:#x}", self.version1));
+            debug.field("version2", &format_args!("{:#x}", self.version2));
+
+            match self.version3 {
+                Some(v) => debug.field("version3", &format_args!("Some({:#x})", v)),
+                None => debug.field("version3", &None::<i32>),
+            };
+
+            match self.compression_level {
+                Some(v) => debug.field("compression_level", &format_args!("Some({:#x})", v)),
+                None => debug.field("compression_level", &None::<i32>),
+            };
+
+            debug.field("version5", &format_args!("{:#x}", self.version5));
+            debug.field("version6", &format_args!("{:#x}", self.version6));
+            debug.field("version7", &format_args!("{:#x}", self.version7));
+
+            debug.finish()
+        }
+    }
+
 
     ///Early, abbreviated compression version (Demon's Souls only).
     pub struct DCPHeaderStruct {
@@ -44,7 +105,6 @@ pub mod header_structs {
         compressed_size: usize,
         byte_order: ByteOrder
     }
-
     impl DCPHeaderStruct {
         pub fn new(decompressed: usize, compressed: usize) -> Self {
             Self {
@@ -58,6 +118,7 @@ pub mod header_structs {
             }
         }
     }
+
 
     /// Compression header (with variation in the `version` fields) in all FromSoft games after Demon's Souls.
     /// NOTE: Not asserting the five 'version' fields so that we can guess when a new format is available.
@@ -83,7 +144,6 @@ pub mod header_structs {
 
         byte_order: ByteOrder // Not serialized.
     }
-
     impl DCXHeaderStruct {
         pub fn new(
             v1: u32,
@@ -121,120 +181,7 @@ pub mod header_structs {
             }
         }
 
-        pub fn from_file(path: &Path) -> Result<Self, DCXError> {
-            let file = File::open(path)
-                            .expect("File should exist.");
-            let mut buffer = [0u8; 68];
-            file.seek_read(&mut buffer, 0)
-                .map_err(|e| DCXError {
-                    msg: format!("Failed to read DCX header: {e}"),
-                })?;;
-
-            Self::from_bytes(&buffer)
-        }
-
-        // Expects a 68 byte header from a file, which is then parsed into a DCXHeaderStruct instance
-        pub fn from_bytes(buffer: &[u8]) -> Result<Self, DCXError> {
-            if buffer.len() < 68 {
-                return Err(DCXError{msg: "Invalid Header Size!".to_string()});
-            }
-
-            let mut offset = 0;
-
-            fn read_u32_be(buffer: &[u8], offset: &mut usize) -> u32 {
-                let value = u32::from_be_bytes([
-                    buffer[*offset],
-                    buffer[*offset + 1],
-                    buffer[*offset + 2],
-                    buffer[*offset + 3],
-                ]);
-
-                *offset += 4;
-                value
-            }
-
-            fn read_bytes<const N: usize>(buffer: &[u8], offset: &mut usize) -> [u8; N] {
-                let value = buffer[*offset..*offset + N]
-                    .try_into()
-                    .unwrap();
-
-                *offset += N;
-                value
-            }
-
-            let dcx = read_bytes::<4>(buffer, &mut offset);
-
-            if dcx != *b"DCX\0" {
-                return Err(DCXError{msg: "Magic `DCX` is Incorrect.".to_string()});
-            }
-
-            let version1 = read_u32_be(buffer, &mut offset);
-            let unk1 = read_u32_be(buffer, &mut offset);
-            let unk2 = read_u32_be(buffer, &mut offset);
-            let version2 = read_u32_be(buffer, &mut offset);
-            let version3 = read_u32_be(buffer, &mut offset);
-
-            let dcs = read_bytes::<4>(buffer, &mut offset);
-
-            if dcs != *b"DCS\0" {
-                return Err(DCXError{msg: "Magic `DCS` is Incorrect.".to_string()});
-            }
-
-            let decompressed_size = read_u32_be(buffer, &mut offset);
-            let compressed_size = read_u32_be(buffer, &mut offset);
-
-            let dcp = read_bytes::<4>(buffer, &mut offset);
-
-            if dcp != *b"DCP\0" {
-                return Err(DCXError{msg: "Magic `DCP` is Incorrect.".to_string()});
-            }
-
-            let compression_type = read_bytes::<4>(buffer, &mut offset);
-
-            if !matches!(
-                &compression_type,
-                b"ZSTD" | b"EDGE" | b"DFLT" | b"KRAK"
-            ) {
-                return Err(DCXError{msg: "Compression type `{&compression_type}` is Invalid!".to_string()});
-            }
-
-            let unk3 = read_u32_be(buffer, &mut offset);
-
-            let compression_level = buffer[offset];
-            offset += 1;
-
-            let compression_level_pad = read_bytes::<3>(buffer, &mut offset);
-
-            let version5 = read_u32_be(buffer, &mut offset);
-            let version6 = read_u32_be(buffer, &mut offset);
-            let unk5 = read_u32_be(buffer, &mut offset);
-            let version7 = read_u32_be(buffer, &mut offset);
-
-            debug_assert_eq!(offset, 68);
-
-            Ok(Self {
-                dcx,
-                version1,
-                unk1,
-                unk2,
-                version2,
-                version3,
-                dcs,
-                decompressed_size,
-                compressed_size,
-                dcp,
-                compression_type,
-                unk3,
-                compression_level,
-                _compression_level_pad: compression_level_pad,
-                version5,
-                version6,
-                unk5,
-                version7,
-                byte_order: ByteOrder::BigEndian,
-            })
-        }
-
+        //TODO: move to WriteTo trait impl
         pub fn to_bytes(&self) -> [u8; 68] {
             let mut buffer = [0u8; 68];
             let mut offset = 0;
@@ -317,6 +264,134 @@ pub mod header_structs {
             self.compression_type
         }
     }
+    impl ReadFrom for DCXHeaderStruct {
+        fn from_reader(mut reader: BinaryReader) -> Result<Self, FerrisoulsError> {
+            let dcx: [u8;4] = reader.read_bytes(4)?
+                .as_slice()
+                .try_into()
+                .unwrap();
+
+            if dcx != *b"DCX\0" {
+                return Err(BinaryReaderError::Custom("Magic `DCX` is Incorrect.".to_string()).into());
+            }
+
+            let version1 = reader.read_u32()?;
+            let unk1 = reader.read_u32()?;
+            let unk2 = reader.read_u32()?;
+            let version2 = reader.read_u32()?;
+            let version3 = reader.read_u32()?;
+
+            let dcs: [u8;4] = reader.read_bytes(4)?
+                .as_slice()
+                .try_into()
+                .unwrap();
+
+            if dcs != *b"DCS\0" {
+                return Err(BinaryReaderError::Custom("Magic `DCS` is Incorrect.".to_string()).into());
+            }
+
+            let decompressed_size = reader.read_u32()?;
+            let compressed_size = reader.read_u32()?;
+
+            let dcp: [u8;4] = reader.read_bytes(4)?
+                .as_slice()
+                .try_into()
+                .unwrap();
+
+            if dcp != *b"DCP\0" {
+                return Err(BinaryReaderError::Custom("Magic `DCP` is Incorrect.".to_string()).into());
+            }
+
+            let compression_type: [u8;4] = reader.read_bytes(4)?
+                .as_slice()
+                .try_into()
+                .unwrap();
+
+            if !matches!(
+                &compression_type,
+                b"ZSTD" | b"EDGE" | b"DFLT" | b"KRAK"
+            ) {
+                return Err(BinaryReaderError::Custom(
+                    format!("Compression type `{:?}` is Invalid!", compression_type)
+                ).into());
+            }
+
+            let unk3 = reader.read_u32()?;
+
+            let compression_level = reader.read_u8()?;
+            let compression_level_pad: [u8;3] = reader.read_bytes(3)?
+                .as_slice()
+                .try_into()
+                .unwrap();
+
+            let version5 = reader.read_u32()?;
+            let version6 = reader.read_u32()?;
+            let unk5 = reader.read_u32()?;
+            let version7 = reader.read_u32()?;
+
+            Ok(Self {
+                dcx,
+                version1,
+                unk1,
+                unk2,
+                version2,
+                version3,
+                dcs,
+                decompressed_size,
+                compressed_size,
+                dcp,
+                compression_type,
+                unk3,
+                compression_level,
+                _compression_level_pad: compression_level_pad,
+                version5,
+                version6,
+                unk5,
+                version7,
+                byte_order: ByteOrder::BigEndian,
+            })
+        }
+
+        // Expects a 68 byte header from a file, which is then parsed into a DCXHeaderStruct instance
+        fn from_bytes(buffer: &[u8]) -> Result<Self, FerrisoulsError> {
+            if buffer.len() < 68 {
+                return Err(BinaryReaderError::Custom("Invalid Header Size!".to_string()).into());
+            }
+            Self::from_reader(BinaryReader::from_bytes(buffer))
+        }
+
+        fn from_path(path: &Path) -> Result<Self, FerrisoulsError> {
+            let file = File::open(path)?;
+            let mut buffer = [0u8; 68];
+            file.seek_read(&mut buffer, 0)
+                .map_err(|e| {
+                    BinaryReaderError::Custom(
+                        format!("Failed to read DCX header: {e}")
+                    )
+                }
+            )?;
+
+
+            Self::from_bytes(&buffer)
+        }
+
+    }
+    impl fmt::Debug for DCXHeaderStruct {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let mut debug = f.debug_struct("DCXHeaderStruct");
+            debug.field("Compressed Size", &self.compressed_size());
+            debug.field("Uncompressed Size", &self.decompressed_size());
+            debug.field("Version Info", &self.get_version_info());
+
+            debug.finish()
+        }
+    }
+    impl fmt::Display for DCXHeaderStruct {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{:#?}", self)
+        }
+    }
+
 
     pub struct DCXEdgeSubheader {
         dca: [u8; 4], // asserted b"DCA\0"
@@ -332,7 +407,6 @@ pub mod header_structs {
         unk5: u32, // asserted 0x100000
         byte_order: ByteOrder
     }
-
     impl DCXEdgeSubheader {
         pub fn new(dca_size: usize, last_block_size: usize, egdt_size: usize, chunk_count: usize) -> Self {
             Self {
@@ -354,88 +428,6 @@ pub mod header_structs {
 
 }
 
-pub struct DCXVersionInfo {
-    pub compression_type: [u8; 4],
-    pub version1: u32,
-    pub version2: u32,
-    pub version3: Option<u32>, // not constant for `DCX_EDGE`
-    pub compression_level: Option<u8>, // not constant for `DCX_ZSTD`
-    pub version5: u32,
-    pub version6: u32,
-    pub version7: u32,
-}
-
-impl PartialEq for DCXVersionInfo {
-    fn eq(&self, other: &Self) -> bool {
-        if self.compression_type != other.compression_type {
-            return false;
-        }
-        if self.version1 != other.version1 {
-            return false;
-        }
-        if self.version2 != other.version2 {
-            return false;
-        }
-
-        if let (Some(a), Some(b)) = (self.version3, other.version3) {
-            if a != b {
-                return false;
-            }
-        }
-
-        if let (Some(a), Some(b)) = (self.compression_level, other.compression_level) {
-            if a != b {
-                return false;
-            }
-        }
-
-        if self.version5 != other.version5 {
-            return false;
-        }
-        if self.version6 != other.version6 {
-            return false;
-        }
-        if self.version7 != other.version7 {
-            return false;
-        }
-
-        true
-    }
-}
-
-impl Hash for DCXVersionInfo {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        "DCXVersionInfo".hash(state);
-    }
-}
-
-//Debug implementation to format integers into hex strings
-impl fmt::Debug for DCXVersionInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = f.debug_struct("DCXVersionInfo");
-        
-        debug.field("compression_type", &self.compression_type);
-        debug.field("version1", &format_args!("{:#x}", self.version1));
-        debug.field("version2", &format_args!("{:#x}", self.version2));
-
-        match self.version3 {
-            Some(v) => debug.field("version3", &format_args!("Some({:#x})", v)),
-            None => debug.field("version3", &None::<i32>),
-        };
-
-        match self.compression_level {
-            Some(v) => debug.field("compression_level", &format_args!("Some({:#x})", v)),
-            None => debug.field("compression_level", &None::<i32>),
-        };
-
-        debug.field("version5", &format_args!("{:#x}", self.version5));
-        debug.field("version6", &format_args!("{:#x}", self.version6));
-        debug.field("version7", &format_args!("{:#x}", self.version7));
-
-        debug.finish()
-    }
-}
-
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -454,13 +446,12 @@ pub enum DCXType {
     DCX_KRAK = 10, // DCX header, Oodle compression. Used in Sekiro and Elden Ring.
     DCX_ZSTD = 11, // ZSTD compression. Used in new ER regulation.
 }
-
 impl DCXType {
     pub fn has_dcx_extension(&self) -> bool {
         (*self as i32) >= 2
     }
 
-    pub fn detect_from_file(path: &Path) -> Result<Self, DCXError> {
+    pub fn detect_from_file(path: &Path) -> Result<Self, FerrisoulsError> {
         let mut file = File::open(path)
                             .expect("File should exist.");
         
@@ -471,7 +462,7 @@ impl DCXType {
     }
 
     ///Takes first 68 bytes of a file (DCXHeaderStruct) and detects the DCXType.
-    pub fn detect(header: [u8; 68]) -> Result<Self, DCXError> {
+    pub fn detect(header: [u8; 68]) -> Result<Self, FerrisoulsError> {
         let magic = &header[0..4];
 
         if magic == b"DCP\0" {
@@ -491,7 +482,7 @@ impl DCXType {
             if b0 == 0x78 && matches!(b1, 0x01 | 0x5E | 0x9C | 0xDA) {
                 return Ok(Self::Zlib);
             }
-            return Ok(Self::Unknown);// very unlikely to be DCX at this point
+            return Ok(Self::Unknown);// very unlikely to be DCX at this point - Grimrukh
         }
 
         let header = DCXHeaderStruct::from_bytes(&header)?;
@@ -740,13 +731,14 @@ pub struct Decompress;
 pub struct Compress;
 
 impl Decompress {
-    pub fn raw(raw_buffer: &Vec<u8>, oodle: &OodleType) -> Result<Vec<u8>, DCXError> {
+    ///Currently only works for KRAK
+    pub fn raw(raw_buffer: &Vec<u8>, oodle: &OodleType) -> Result<Vec<u8>, FerrisoulsError> {
         let header: &[u8; 68] = raw_buffer[..0x44].try_into().unwrap();
         let dcx_type = DCXType::detect(*header)?;
 
         if dcx_type != DCXType::DCX_KRAK {
             todo!();
-            return Err(DCXError::new("Cannot decompress this DCX type yet."))
+            return Err(FerrisoulsError::DCX(DCXError::new("Cannot decompress this DCX type yet.")))
         }
         
         let header = DCXHeaderStruct::from_bytes(header)?;
@@ -792,18 +784,16 @@ impl Decompress {
 
     }
 
-    pub fn file(path: &Path, oodle: &OodleType) -> Result<Vec<u8>, DCXError> {
+    pub fn file(path: &Path, oodle: &OodleType) -> Result<Vec<u8>, FerrisoulsError> {
         let mut file_data = Vec::new();
-        File::open(path)
-            .expect("File should exist.")
-            .read_to_end(&mut file_data)
-            .unwrap();
+        File::open(path)?.read_to_end(&mut file_data)?;
         Self::raw(&file_data, oodle)
     }
 
 }
 
 impl Compress {
+    ///Currently only works for KRAK
     pub fn raw(raw_buffer: &Vec<u8>, dcx_type: DCXType, oodle: &OodleType) -> Result<Vec<u8>, DCXError> {
         if dcx_type != DCXType::DCX_KRAK {
             todo!();
@@ -869,14 +859,14 @@ impl Compress {
         header.extend_from_slice(&mut compressed);
 
         Ok(header)
-        /*
-            TODO:
-            Split logic into trait functions for DCXType for readability instead of a match
-        */
     }
 
 }
 
+/*
+    TODO:
+    Split logic into match by DCXType for different logic
+*/
 
 #[cfg(test)]
 mod tests {
@@ -884,24 +874,41 @@ mod tests {
     use crate::oodle::core::get_oodle;
 
     #[test]
-    #[ignore = "no"]
-    fn get_dcxtype_from_file() -> Result<(), DCXError> {
-        let path = Path::new("../tests/01_common.sblytbnd.dcx");
+    fn get_dcxtype_from_file() -> Result<(), FerrisoulsError> {
+        //let path = Path::new(".../tests/01_common.sblytbnd.dcx");
+        let path = Path::new(r"...\tests\01_common.sblytbnd.dcx");
         let r = DCXType::detect_from_file(path)?;
-        println!("{:?}", r);
+        let h = DCXHeaderStruct::from_path(path)?;
+        println!("{:?}\n{}", r, h);
         return Ok(());
+        /*
+        DCX_KRAK
+        DCXHeaderStruct {
+            Compressed Size: 21047,
+            Uncompressed Size: 402623,
+            Version Info: DCXVersionInfo {
+                compression_type: KRAK,
+                version1: 0x11000,
+                version2: 0x44,
+                version3: Some(0x4c),
+                compression_level: Some(0x6),
+                version5: 0x0,
+                version6: 0x0,
+                version7: 0x10100,
+            },
+        }*/
     }
 
     #[test]
     fn test_compress() {
         let oodle = unsafe {
             get_oodle(Path::new(
-                "../tests/oo2core_6_win64.dll"
+                ".../tests/oo2core_6_win64.dll"
             ))
             .unwrap()
         };
 
-        let file = Path::new("../tests/01_common.sblytbnd.dcx");
+        let file = Path::new(".../tests/01_common.sblytbnd.dcx");
         let mut f = File::open(file).unwrap();
         let mut empty = Vec::new();
         f.read_to_end(&mut empty);

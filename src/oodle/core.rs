@@ -1,7 +1,7 @@
 
 use std::{ffi::c_void, path::{Path, PathBuf}};
 use libloading::{Library, Symbol};
-use crate::common::dcx::DCXError;
+use crate::errors::DCXError;
 use crate::oodle::{bindings, enums, structs};
 
 pub trait Oodle {

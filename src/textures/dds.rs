@@ -2,7 +2,8 @@ use std::{io, error::Error, ops::BitOrAssign};
 use std::io::{Read, Error as IOError, ErrorKind};
 use other_enums::*;
 use crate::textures::dxgi::{self, DxgiFormat};
-use crate::common::dcx::{DCXError, DCXType};
+use crate::common::dcx::DCXType;
+use crate::errors::DCXError;
 
 mod other_enums {
     pub enum DDSD {

@@ -1,28 +1,8 @@
 use std::cmp::{max, min};
-use std::error::Error;
-use std::fmt;
 
 use crate::textures::dxgi::DxgiFormat;
 use crate::textures::utils::{Morton8, MortonAlgorithms};
-
-#[derive(Debug, Clone)]
-pub struct SwizzleError {
-    msg: String,
-}
-
-impl SwizzleError {
-    pub fn new(msg: impl Into<String>) -> Self {
-        Self { msg: msg.into() }
-    }
-}
-
-impl Error for SwizzleError {}
-
-impl fmt::Display for SwizzleError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.msg)
-    }
-}
+use crate::errors::SwizzleError;
 
 
 pub struct Swizzler;
@@ -140,6 +120,7 @@ impl Swizzler {
 
     }
 
+    //TODO: add other platforms as per DrSwizzler 
 }
 
 
@@ -229,6 +210,7 @@ impl Deswizzler {
 
     }
 
+    //TODO: add other platforms as per DrSwizzler 
 }
 
 
@@ -245,9 +227,7 @@ pub fn pad_vec(data: &[u8], min_size: usize, length: usize) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-
-use super::*;
+    use super::*;
 
     #[test]
     fn test_swizzle() {
