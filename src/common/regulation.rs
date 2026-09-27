@@ -36,16 +36,16 @@ impl RawRegulation {
     }
 
     pub fn decrypt(key: &[u8; 32], secret: &[u8]) -> Result<Vec<u8>, &'static str> {
-        if secret.len() < 16 {
+        if secret.len() < IV_LENGTH {
             return Err("Secret must contain at least a 16-byte IV");
         }
 
         //first 16 bytes is iv
-        let iv: &[u8; 16] = secret[..16]
+        let iv: &[u8; IV_LENGTH] = secret[..IV_LENGTH]
             .try_into()
             .map_err(|_| "Invalid IV")?;
 
-        let ciphertext = &secret[16..];
+        let ciphertext = &secret[IV_LENGTH..];
 
         //pad ciphertext until its len is a multiple of 16
         let padded_len = (ciphertext.len() + 15) / 16 * 16;
@@ -61,7 +61,7 @@ impl RawRegulation {
     }
 
     pub fn encrypt(key: &[u8; 32], secret: &[u8]) -> Vec<u8> {
-        let iv = [0u8; 16];
+        let iv = [0u8; IV_LENGTH];
         let padded_len = ((secret.len() / 16) + 1) * 16;
 
         let mut encrypted = vec![0u8; padded_len];

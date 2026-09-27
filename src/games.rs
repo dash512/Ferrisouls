@@ -2,9 +2,6 @@ use hex_literal::hex;
 use crate::common::dcx::DCXType;
 
 
-pub const IV_LENGTH: usize = 16;
-
-
 pub struct Game {
     pub name: &'static str,
     pub regulation_key: Option<[u8;32]>,
