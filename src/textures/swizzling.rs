@@ -20,7 +20,7 @@ impl Swizzler {
         let block_size = bytes_per_block as u32;
 
         if texels_per_block >= deswizzled.len() {
-            return Err(SwizzleError::new(
+            return Err(SwizzleError::swizzle(
                 format!("DDS texture is too small to contain a single pixel set (expected {texels_per_block} bytes).")
             ));
         }
@@ -33,7 +33,7 @@ impl Swizzler {
             .checked_mul(height)
             .and_then(|n| n.checked_mul(bits_per_texel as u32))
             .and_then(|n| n.checked_div(8))
-            .ok_or_else(|| SwizzleError::new("Linear texture size overflowed."))?;
+            .ok_or_else(|| SwizzleError::swizzle("Linear texture size overflowed.".to_string()))?;
         let mut swizzled: Vec<u8> = vec![0u8; swizzled_size as usize];
 
         let sy = (height / block_size) as usize;
@@ -61,7 +61,7 @@ impl Swizzler {
         let block_size = bytes_per_block as u32;
 
         if texels_per_block >= deswizzled.len() {
-            return Err(SwizzleError::new(
+            return Err(SwizzleError::swizzle(
                 format!("DDS texture is too small to contain a single pixel set (expected {texels_per_block} bytes).")
             ));
         }
@@ -72,12 +72,11 @@ impl Swizzler {
         let linear_size = sx
             .checked_mul(sy)
             .and_then(|n| n.checked_mul(texels_per_block as usize))
-            .ok_or_else(|| SwizzleError::new("Linear texture size overflowed."))?;
+            .ok_or_else(|| SwizzleError::swizzle("Linear texture size overflowed.".to_string()))?;
 
         if deswizzled.len() < linear_size {
-            return Err(SwizzleError::new(
-                "DDS texture is smaller than the expected linear texture size."
-                    .to_string(),
+            return Err(SwizzleError::swizzle(
+                "DDS texture is smaller than the expected linear texture size.".to_string(),
             ));
         }
         
@@ -133,7 +132,7 @@ impl Deswizzler {
         let block_size = bytes_per_block as u32;
         
         if texels_per_block >= swizzled.len() {
-            return Err(SwizzleError::new(
+            return Err(SwizzleError::deswizzle(
                 format!("DDS texture is too small to contain a single pixel set (expected {texels_per_block} bytes).")
             ));
         }
@@ -165,7 +164,7 @@ impl Deswizzler {
         let block_size = bytes_per_block as u32;
         
         if texels_per_block >= swizzled.len() {
-            return Err(SwizzleError::new(
+            return Err(SwizzleError::deswizzle(
                 format!("DDS texture is too small to contain a single pixel set (expected {texels_per_block} bytes).")
             ));
         }

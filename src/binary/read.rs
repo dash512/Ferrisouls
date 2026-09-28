@@ -1,11 +1,8 @@
 /// Logic adapted from SoulsFormatsNext and Constrata
 
-use std::{
-    fs::File, 
-    io::{self, Cursor, Read, Seek, SeekFrom}, path::Path,
-};
+use std::io::{self, Cursor, Read, Seek, SeekFrom};
 
-use byteorder::{BigEndian, ByteOrder, LittleEndian, ReadBytesExt};
+use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use encoding_rs::SHIFT_JIS;
 
 use crate::errors::{BinaryReaderError, FerrisoulsError};
@@ -98,6 +95,32 @@ impl BinaryReader {
         self.set_position(new_position)
     }
 
+    //region Generic types
+
+    pub fn read<T: Readable>(&mut self) -> Result<T> {
+        T::read_from(self)
+    }
+
+    pub fn assert<T>(&mut self, value: T) -> Result<T>
+    where T: Readable + PartialEq + std::fmt::Debug {
+        let lhs = T::read_from(self)?;
+
+        if lhs != value {
+            return Err(BinaryReaderError::Custom(
+                format!("Asserted `{:?}` was incorrect!", value),
+            ));
+        }
+
+        Ok(lhs)
+    }
+
+
+    pub fn read_vec<T: Readable>(&mut self, count: usize) -> Result<Vec<T>> {
+        (0..count)
+            .map(|_| self.read())
+            .collect()
+    }
+
     //region Input
 
     pub fn as_slice(&self) -> &[u8] {
@@ -146,6 +169,19 @@ impl BinaryReader {
             })?;
 
         Ok(())
+    }
+
+    pub fn assert_bytes(&mut self, value: &[u8]) -> Result<Vec<u8>> {
+        let lhs = Self::read_bytes(self, value.len())?;
+
+        if lhs != value {
+            return Err(
+                BinaryReaderError::Custom(
+                        format!("Asserted magic `{:?}` was incorrect!", value)
+                    )
+                );
+        }
+        Ok(lhs)
     }
 
     //region Stepping
@@ -761,28 +797,36 @@ impl Default for BinaryReader {
 
 
 
-pub trait ReadFrom {
-    fn from_reader(reader: BinaryReader) -> std::result::Result<Self, FerrisoulsError> where Self: Sized;
-
-    fn from_bytes(data: &[u8]) -> std::result::Result<Self, FerrisoulsError>
-    where Self: Sized {
-        Ok(Self::from_reader(
-            BinaryReader::from_bytes(&data)
-        )?)
-    }
-
-    fn from_file(mut f: &File) -> std::result::Result<Self, FerrisoulsError>
-    where Self: Sized {
-        let mut data = Vec::<u8>::new();
-        f.read_to_end(&mut data)?;
-        Ok(Self::from_reader(
-            BinaryReader::from_bytes(&data)
-        )?)
-    }
-
-    fn from_path(path: &Path) -> std::result::Result<Self, FerrisoulsError>
-    where Self: Sized {
-        let file = File::open(path)?;
-        Ok(Self::from_file(&file)?)
-    }
+pub trait Readable: Sized {
+    fn read_from(reader: &mut BinaryReader) -> Result<Self>;
 }
+
+macro_rules! impl_readable {
+    ($($ty:ty => $method:ident),* $(,)?) => {
+        $(
+            impl Readable for $ty {
+                #[inline]
+                fn read_from(reader: &mut BinaryReader) -> Result<Self> {
+                    reader.$method()
+                }
+            }
+        )*
+    };
+}
+
+impl_readable! {
+    u8   => read_u8,
+    i8   => read_i8,
+    u16  => read_u16,
+    i16  => read_i16,
+    u32  => read_u32,
+    i32  => read_i32,
+    u64  => read_u64,
+    i64  => read_i64,
+    u128 => read_u128,
+    i128 => read_i128,
+    f32  => read_f32,
+    f64  => read_f64,
+    bool => read_boolean,
+}
+

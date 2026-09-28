@@ -4,7 +4,7 @@ use std::{fs::File, path::Path};
 use std::io::Read;
 use cipher::{block_padding::{NoPadding, Pkcs7}, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 
-use crate::binary::read::ReadFrom;
+use crate::binary::IO;
 use crate::games::Game;
 
 type Decryptor = cbc::Decryptor<aes::Aes256>;

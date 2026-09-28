@@ -1,7 +1,7 @@
 use hex_literal::hex;
-use crate::common::dcx::DCXType;
+use crate::dcx::DCXType;
 
-
+#[derive(Debug, PartialEq)]
 pub struct Game {
     pub name: &'static str,
     pub regulation_key: Option<[u8;32]>,

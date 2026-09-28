@@ -1,4 +1,4 @@
-use crate::errors::FormatNotFoundError;
+use crate::errors::FerrisoulsError::{self, FormatNotFound};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FormatInfo {
@@ -1403,26 +1403,26 @@ impl DxgiFormat {
         self.description
     }
 
-    pub fn from_id(id: u32) -> Result<DxgiFormat, FormatNotFoundError> {
+    pub fn from_id(id: u32) -> Result<DxgiFormat, FerrisoulsError> {
         for format in Self::DXGI_FORMATS.iter() {
             if id == format.id() {
                 return Ok(format.clone());
             }
         }
-        Err(FormatNotFoundError)
+        Err(FormatNotFound)
     }
 
-    pub fn from_name(name: &str) -> Result<DxgiFormat, FormatNotFoundError> {
+    pub fn from_name(name: &str) -> Result<DxgiFormat, FerrisoulsError> {
         for format in Self::DXGI_FORMATS.iter() {
             if name == format.name {
                 return Ok(format.clone());
             }
         }
-        Err(FormatNotFoundError)
+        Err(FormatNotFound)
     }
 
     /// Get dxgi format from internal enum value found in TPFTexture object
-    pub fn from_tpftexture_id(id: u8) -> Result<DxgiFormat, FormatNotFoundError> {
+    pub fn from_tpftexture_id(id: u8) -> Result<DxgiFormat, FerrisoulsError> {
         match id {
             0 | 1 | 25 | 29 | 108 | 109 => Ok(Self::BC1_UNORM),
             3 => Ok(Self::BC2_UNORM),
@@ -1437,7 +1437,7 @@ impl DxgiFormat {
             102 | 106 | 107 => Ok(Self::BC7_UNORM),
             104 => Ok(Self::BC5_UNORM),
             112 => Ok(Self::BC7_UNORM_SRGB),
-            _=> Err(FormatNotFoundError)
+            _=> Err(FormatNotFound)
         }
     }
 }
@@ -1448,14 +1448,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_id_get_works() -> Result<(), FormatNotFoundError> {
+    fn test_id_get_works() -> Result<(), FerrisoulsError> {
         let format = DxgiFormat::from_id(71)?;
         assert_eq!(format, DxgiFormat::BC1_UNORM);
         return Ok(());
     }
 
     #[test]
-    fn test_from_tpftexture_and_properties() -> Result<(), FormatNotFoundError> {
+    fn test_from_tpftexture_and_properties() -> Result<(), FerrisoulsError> {
         let format = DxgiFormat::from_tpftexture_id(106)?;
         assert_eq!(format.id(), 98);
         assert_eq!(format.name(), "BC7_UNORM");

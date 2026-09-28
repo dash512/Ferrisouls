@@ -1,6 +1,7 @@
 /// Logic adapted from SoulsFormatsNext and Constrata
 
 use std::{num::TryFromIntError, path::Path};
+use std::collections::HashMap;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use encoding_rs::SHIFT_JIS;
@@ -8,6 +9,11 @@ use encoding_rs::SHIFT_JIS;
 use crate::errors::{FerrisoulsError, BinaryWriterError};
 
 pub type Result<T> = std::result::Result<T, BinaryWriterError>;
+
+pub struct Reservation {
+    offset: usize,
+    length: usize,
+}
 
 pub struct BinaryWriter {
     data: Vec<u8>,
@@ -17,18 +23,30 @@ pub struct BinaryWriter {
     pub varint_long: bool,
 
     steps: Vec<usize>,
+
+    reservations: HashMap<String, Reservation>
 }
 
 impl BinaryWriter {
+    // Editing
+    pub fn set(&mut self, data: Vec<u8>) {
+        self.data = data
+    }
+
+    pub fn append(&mut self, data: Vec<u8>) {
+        self.data.extend(data);
+    }
+
     //region Creation
 
     pub fn new() -> Self {
         Self {
             data: Vec::new(),
             position: 0,
-            big_endian: false,
+            big_endian: true,
             varint_long: false,
             steps: Vec::new(),
+            reservations: HashMap::new()
         }
     }
 
@@ -36,9 +54,10 @@ impl BinaryWriter {
         Self {
             data: Vec::with_capacity(capacity),
             position: 0,
-            big_endian: false,
+            big_endian: true,
             varint_long: false,
             steps: Vec::new(),
+            reservations: HashMap::new()
         }
     }
 
@@ -48,9 +67,10 @@ impl BinaryWriter {
         Self {
             data,
             position,
-            big_endian: false,
+            big_endian: true,
             varint_long: false,
             steps: Vec::new(),
+            reservations: HashMap::new()
         }
     }
 
@@ -177,7 +197,7 @@ impl BinaryWriter {
     }
 
     //region Alignment
-    pub fn pad(&mut self, align: u64) -> Result<()> {
+    pub fn pad_align(&mut self, align: u64) -> Result<()> {
         if align == 0 {
             return Ok(());
         }
@@ -601,14 +621,57 @@ impl BinaryWriter {
         Ok(())
     }
 
+    //region Generic types
+
+    pub fn write<T: Writable>(&mut self, value: T) -> Result<()> {
+        T::write_to(&value, self)
+    }
+
     //region Reserves and patches
 
-    pub fn reserve(&mut self, size: usize) -> Result<u64> {
+    pub fn reserve(&mut self, name: String, size: usize) -> Result<u64> {
         let offset = self.position();
 
         self.write_zeros(size)?;
 
+        self.reservations.insert(name, Reservation { offset: offset as usize, length: size});
+
         Ok(offset)
+    }
+
+    pub fn fill<T: Writable>(&mut self, name: String, value: T) -> Result<()> {
+        let res = self.reservations.get(&name)
+            .ok_or(BinaryWriterError::Custom("Reservation doesn't exist!".to_string()))?;
+
+        let old_position = self.position();
+
+        self.set_position(res.offset as u64)?;
+        self.write::<T>(value)?;
+        self.set_position(old_position)?;
+
+        self.reservations.remove(&name);
+
+        Ok(())
+    }
+
+
+    pub fn fill_iter<T: Writable + ExactSizeIterator>(&mut self, name: String, value: T) -> Result<()> {
+        let res = self.reservations.get(&name)
+            .ok_or(BinaryWriterError::Custom("Reservation doesn't exist!".to_string()))?;
+
+        if value.len() > res.length {
+            return Err(BinaryWriterError::Custom("Value doesn't match reservation length!".to_string()));
+        }
+
+        let old_position = self.position();
+
+        self.set_position(res.offset as u64);
+        self.write::<T>(value);
+        self.set_position(old_position)?;
+
+        self.reservations.remove(&name);
+
+        Ok(())
     }
 
     pub fn patch_u8(
@@ -644,12 +707,37 @@ impl Default for BinaryWriter {
 
 
 
-pub trait WriteTo {
-    fn to_writer(&self) -> std::result::Result<Self, FerrisoulsError> where Self: Sized;
 
-    fn to_bytes(&self) -> std::result::Result<Vec<u8>, FerrisoulsError>;
-
-    fn to_file(&self, path: &Path) -> std::result::Result<(), FerrisoulsError>;
-    //call to_bytes
-
+pub trait Writable: Sized {
+    fn write_to(&self, writer: &mut BinaryWriter) -> Result<()>;
 }
+
+macro_rules! impl_writable {
+    ($($ty:ty => $method:ident),* $(,)?) => {
+        $(
+            impl Writable for $ty {
+                #[inline]
+                fn write_to(&self, writer: &mut BinaryWriter) -> Result<()> {
+                    writer.$method(*self)
+                }
+            }
+        )*
+    };
+}
+
+impl_writable! {
+    u8   => write_u8,
+    i8   => write_i8,
+    u16  => write_u16,
+    i16  => write_i16,
+    u32  => write_u32,
+    i32  => write_i32,
+    u64  => write_u64,
+    i64  => write_i64,
+    u128 => write_u128,
+    i128 => write_i128,
+    f32  => write_f32,
+    f64  => write_f64,
+    bool => write_boolean,
+}
+

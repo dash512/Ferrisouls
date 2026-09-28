@@ -2,8 +2,8 @@ use std::ffi::c_void;
 
 pub mod o26 {
     use super::*;
-    pub use crate::oodle::enums::o26::*;
-    pub use crate::oodle::structs::o26::CompressOptions;
+    pub use crate::oodle::enums::*;
+    pub use crate::oodle::structs::O26CompressOptions;
     
     #[allow(non_camel_case_types)]
     pub type OodleLZ_Compress = unsafe extern "system" fn(
@@ -12,7 +12,7 @@ pub mod o26 {
             raw_buf_size: isize, // rawLen
             comp_buf_array: *mut c_void, // compBuf
             level: CompressionLevel, // level
-            p_options: *const CompressOptions, // pOptions
+            p_options: *const O26CompressOptions, // pOptions
             dictionary_base: *const c_void, // dictionaryBase
             lrm: *const c_void, // lrm
             scratch_mem: *mut c_void, // scratchMem
@@ -41,7 +41,7 @@ pub mod o26 {
     pub type OodleLZ_CompressOptions_GetDefault = unsafe extern "system" fn(
             compressor: Compressor,
             level: CompressionLevel
-        ) -> *mut (CompressOptions);
+        ) -> *mut (O26CompressOptions);
 
     #[allow(non_camel_case_types)]
     pub type OodleLZ_GetCompressedBufferSizeNeeded = unsafe extern "system" fn(
@@ -70,8 +70,8 @@ pub mod o26 {
 
 pub mod o28 {
     use super::*;
-    pub use crate::oodle::enums::o28::*;
-    pub use crate::oodle::structs::o28::CompressOptions;
+    pub use crate::oodle::enums::*;
+    pub use crate::oodle::structs::O28CompressOptions;
     
     #[allow(non_camel_case_types)]
     pub type OodleLZ_Compress = unsafe extern "system" fn(
@@ -80,7 +80,7 @@ pub mod o28 {
             raw_buf_size: isize, // rawLen
             comp_buf_array: *mut c_void, // compBuf
             level: CompressionLevel, // level
-            p_options: *const CompressOptions, // pOptions
+            p_options: *const O28CompressOptions, // pOptions
             dictionary_base: *const c_void, // dictionaryBase
             lrm: *const c_void, // lrm
             scratch_mem: *mut c_void, // scratchMem
@@ -109,7 +109,7 @@ pub mod o28 {
     pub type OodleLZ_CompressOptions_GetDefault = unsafe extern "system" fn(
             compressor: Compressor,
             level: CompressionLevel
-        ) -> *mut (CompressOptions);
+        ) -> *mut (O28CompressOptions);
         // function is unchanged but fields in CompressOptions changed between 2.6 and 2.8
 
     #[allow(non_camel_case_types)]
@@ -154,8 +154,8 @@ pub mod o28 {
 
 pub mod o29 {
     use super::*;
-    pub use crate::oodle::enums::o29::*;
-    pub use crate::oodle::structs::o29::CompressOptions;
+    pub use crate::oodle::enums::*;
+    pub use crate::oodle::structs::O29CompressOptions;
     
     #[allow(non_camel_case_types)]
     pub type OodleLZ_Compress = unsafe extern "system" fn(
@@ -164,7 +164,7 @@ pub mod o29 {
             raw_buf_size: isize, // rawLen
             comp_buf_array: *mut c_void, // compBuf
             level: CompressionLevel, // level
-            p_options: *const CompressOptions, // pOptions
+            p_options: *const O29CompressOptions, // pOptions
             dictionary_base: *const c_void, // dictionaryBase
             lrm: *const c_void, // lrm
             scratch_mem: *mut c_void, // scratchMem
@@ -194,7 +194,7 @@ pub mod o29 {
     pub type OodleLZ_CompressOptions_GetDefault = unsafe extern "system" fn(
             //compressor: Compressor,
             //level: CompressionLevel
-        ) -> *mut (CompressOptions); // fields in CompressOptions differ from 2.6
+        ) -> *mut (O29CompressOptions); // fields in CompressOptions differ from 2.6
 
     #[allow(non_camel_case_types)]
     pub type OodleLZ_GetCompressedBufferSizeNeeded = unsafe extern "system" fn(
