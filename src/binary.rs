@@ -15,7 +15,7 @@ pub trait IO {
     fn from_bytes(data: &[u8]) -> std::result::Result<Self, FerrisoulsError>
     where Self: Sized {
         Ok(Self::from_reader(
-            &mut BinaryReader::from_bytes(&data)
+            &mut BinaryReader::from(data, true, false)
         )?)
     }
 
@@ -24,7 +24,7 @@ pub trait IO {
         let mut data = Vec::<u8>::new();
         f.read_to_end(&mut data)?;
         Ok(Self::from_reader(
-            &mut BinaryReader::from_bytes(&data)
+            &mut BinaryReader::from(&data, true, false)
         )?)
     }
 
@@ -35,11 +35,11 @@ pub trait IO {
     }
 
     //Write
-    fn to_writer(&self) -> std::result::Result<BinaryWriter, FerrisoulsError> {
-        Ok(BinaryWriter::from_bytes(self.to_bytes()?))
-    }
+    fn to_writer(&self) -> std::result::Result<BinaryWriter, FerrisoulsError>;
 
-    fn to_bytes(&self) -> std::result::Result<Vec<u8>, FerrisoulsError>;
+    fn to_bytes(&self) -> std::result::Result<Vec<u8>, FerrisoulsError> {
+        Ok(self.to_writer()?.into_inner())
+    }
 
     fn to_file(&self, path: &Path) -> std::result::Result<(), FerrisoulsError> {
         todo!()

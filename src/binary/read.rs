@@ -9,32 +9,24 @@ use crate::errors::{BinaryReaderError, FerrisoulsError};
 
 pub type Result<T> = std::result::Result<T, BinaryReaderError>;
 
-pub struct BinaryReader {
-    data: Cursor<Vec<u8>>,
+pub struct BinaryReader<'a> {
+    data: Cursor<&'a [u8]>,
     pub big_endian: bool,
     pub varint_long: bool,
 
     steps: Vec<u64>,
 }
 
-impl BinaryReader {
+impl<'a> BinaryReader<'a> {
     //region Creation
 
-    pub fn new(data: Vec<u8>, be: bool, long: bool) -> Self {
+    pub fn from(data: &'a [u8], big_endian: bool, varint_long: bool) -> Self {
         Self {
             data: Cursor::new(data),
-            big_endian: be,
-            varint_long: long,
+            big_endian,
+            varint_long,
             steps: Vec::new(),
         }
-    }
-
-    pub fn from_bytes(data: &[u8]) -> Self {
-        Self::new(
-            data.to_vec(),
-            true,
-            false
-        )
     }
 
     //region Position
@@ -122,10 +114,6 @@ impl BinaryReader {
     }
 
     //region Input
-
-    pub fn as_slice(&self) -> &[u8] {
-        self.data.get_ref().as_slice()
-    }
 
     pub fn read_bytes(&mut self, count: usize) -> Result<Vec<u8>> {
         let position = self.position();
@@ -782,16 +770,6 @@ impl BinaryReader {
         self.set_position(old_position)?;
 
         result
-    }
-}
-
-impl Default for BinaryReader {
-    fn default() -> Self {
-        Self::new(
-            Vec::new(),
-            true,
-            false
-        )
     }
 }
 

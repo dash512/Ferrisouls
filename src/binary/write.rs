@@ -28,50 +28,51 @@ pub struct BinaryWriter {
 }
 
 impl BinaryWriter {
+    //region Creation
+
+    pub fn new(big_endian: bool, varint_long: bool) -> Self {
+        Self {
+            data: Vec::new(),
+            position: 0,
+            big_endian: big_endian,
+            varint_long: varint_long,
+            steps: Vec::new(),
+            reservations: HashMap::new()
+        }
+    }
+
+    pub fn with_capacity(capacity: usize, big_endian: bool, varint_long: bool) -> Self {
+        Self {
+            data: Vec::with_capacity(capacity),
+            position: 0,
+            big_endian: big_endian,
+            varint_long: varint_long,
+            steps: Vec::new(),
+            reservations: HashMap::new()
+        }
+    }
+
+    pub fn from_bytes(data: Vec<u8>, big_endian: bool, varint_long: bool) -> Self {
+        let position = data.len();
+
+        Self {
+            data,
+            position,
+            big_endian: big_endian,
+            varint_long: varint_long,
+            steps: Vec::new(),
+            reservations: HashMap::new()
+        }
+    }
+
     // Editing
+    
     pub fn set(&mut self, data: Vec<u8>) {
         self.data = data
     }
 
     pub fn append(&mut self, data: Vec<u8>) {
         self.data.extend(data);
-    }
-
-    //region Creation
-
-    pub fn new() -> Self {
-        Self {
-            data: Vec::new(),
-            position: 0,
-            big_endian: true,
-            varint_long: false,
-            steps: Vec::new(),
-            reservations: HashMap::new()
-        }
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            data: Vec::with_capacity(capacity),
-            position: 0,
-            big_endian: true,
-            varint_long: false,
-            steps: Vec::new(),
-            reservations: HashMap::new()
-        }
-    }
-
-    pub fn from_bytes(data: Vec<u8>) -> Self {
-        let position = data.len();
-
-        Self {
-            data,
-            position,
-            big_endian: true,
-            varint_long: false,
-            steps: Vec::new(),
-            reservations: HashMap::new()
-        }
     }
 
     //region Position
@@ -701,7 +702,7 @@ impl BinaryWriter {
 
 impl Default for BinaryWriter {
     fn default() -> Self {
-        Self::new()
+        Self::new(true, false)
     }
 }
 

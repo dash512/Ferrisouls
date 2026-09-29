@@ -34,6 +34,7 @@ pub mod header_structs {
         pub version6: u32,
         pub version7: u32,
     }
+    
     impl PartialEq for DCXVersionInfo {
         fn eq(&self, other: &Self) -> bool {
             if self.compression_type != other.compression_type {
@@ -71,11 +72,13 @@ pub mod header_structs {
             true
         }
     }
+    
     impl Hash for DCXVersionInfo {
         fn hash<H: Hasher>(&self, state: &mut H) {
             "DCXVersionInfo".hash(state);
         }
     }
+    
     //Debug implementation to format integers into hex strings
     impl fmt::Debug for DCXVersionInfo {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -108,14 +111,14 @@ pub mod header_structs {
     pub struct DCPHeader {
         dcp: [u8; 4], // asserted b"DCP"
         dflt: [u8; 4], // asserted b"DFLT"
-        unks: [u64; 6], // asserted [0x20, 0x9000000, 0, 0, 0, 0x10100]
+        unks: [u32; 6], // asserted [0x20, 0x9000000, 0, 0, 0, 0x10100]
         dcs: [u8; 4], // asserted b"DCS"
-        pub decompressed_size: usize,
-        pub compressed_size: usize,
-        byte_order: ByteOrder
+        pub decompressed_size: u32,
+        pub compressed_size: u32,
     }
+    
     impl DCPHeader {
-        pub fn new(decompressed: usize, compressed: usize) -> Self {
+        pub fn new(decompressed: u32, compressed: u32) -> Self {
             Self {
                 dcp: *b"DCP\0",
                 dflt: *b"DFLT",
@@ -123,28 +126,28 @@ pub mod header_structs {
                 dcs: *b"DCS\0",
                 decompressed_size: decompressed,
                 compressed_size: compressed,
-                byte_order: ByteOrder::BigEndian
             }
         }
 
-        pub fn compressed_size(&self) -> usize {
+        pub fn compressed_size(&self) -> u32 {
             self.compressed_size
         }
 
-        pub fn decompressed_size(&self) -> usize {
+        pub fn decompressed_size(&self) -> u32 {
             self.decompressed_size
         }
 
     }
+    
     impl IO for DCPHeader {
         fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
             reader.assert_bytes(b"DCP\0")?;
             reader.assert_bytes(b"DFLT")?;
-            let unks: Vec<u64> = reader.read_vec(6)?;
+            let unks: Vec<u32> = reader.read_vec(6)?;
             reader.assert_bytes(b"DCS\0")?;
 
-            let decompressed_size = reader.read_u32()? as usize;
-            let compressed_size = reader.read_u32()? as usize;
+            let decompressed_size = reader.read_u32()?;
+            let compressed_size = reader.read_u32()?;
 
             Ok(
                 Self {
@@ -155,46 +158,29 @@ pub mod header_structs {
                     dcs: *b"DCS\0", 
                     decompressed_size,
                     compressed_size, 
-                    byte_order: ByteOrder::BigEndian
                 }
             )  
         }
 
-        fn to_bytes(&self) -> Result<Vec<u8>, FerrisoulsError> {
-            let mut buffer = [72];
-            let mut offset = 0;
+        fn to_writer(&self) -> Result<BinaryWriter, FerrisoulsError> {
+            let mut writer = BinaryWriter::default();
 
-            fn write_u32_be(buffer: &mut [u8], offset: &mut usize, value: u32) {
-                buffer[*offset..*offset + 4].copy_from_slice(&value.to_be_bytes());
-                *offset += 4;
-            }
+            writer.write_bytes(b"DCP\0")?;
+            writer.write_bytes(b"DFLT")?;
 
-            fn write_bytes<const N: usize>(
-                buffer: &mut [u8],
-                offset: &mut usize,
-                value: &[u8; N],
-            ) {
-                buffer[*offset..*offset + N].copy_from_slice(value);
-                *offset += N;
-            }
+            writer.write_u32(0x20u32)?;//unk1
+            writer.write_u32(0x9000000u32)?;//unk2
+            writer.write_u32(0u32)?;//unk3
+            writer.write_u32(0u32)?;//unk4
+            writer.write_u32(0u32)?;//unk5
+            writer.write_u32(0x10100u32)?;//unk6
 
+            writer.write_u32(self.decompressed_size)?;
+            writer.write_u32(self.compressed_size)?;
 
-            write_bytes(&mut buffer, &mut offset, b"DCP\0");
-            write_bytes(&mut buffer, &mut offset, b"DFLT");
+            debug_assert_eq!(writer.length(), 72);
 
-            write_u32_be(&mut buffer, &mut offset, 0x20u32);//unk1
-            write_u32_be(&mut buffer, &mut offset, 0x9000000u32);//unk2
-            write_u32_be(&mut buffer, &mut offset, 0u32);//unk3
-            write_u32_be(&mut buffer, &mut offset, 0u32);//unk4
-            write_u32_be(&mut buffer, &mut offset, 0u32);//unk5
-            write_u32_be(&mut buffer, &mut offset, 0x10100u32);//unk6
-
-            write_u32_be(&mut buffer, &mut offset, self.decompressed_size as u32);
-            write_u32_be(&mut buffer, &mut offset, self.compressed_size as u32);
-
-            debug_assert_eq!(offset, 72);
-
-            Ok(buffer.to_vec())
+            Ok(writer)
         }
     }
 
@@ -217,11 +203,10 @@ pub mod header_structs {
         _compression_level_pad: [u8; 3], // 3 * b"\0" padding
         version5: u32, // [0, 0x10000]
         version6: u32, // [0, 0xF000000]
-        unk5: u32, // asserted 0
+        unk4: u32, // asserted 0
         version7: u32, // [0x10100, 0x101000]
-
-        byte_order: ByteOrder // Not serialized.
     }
+    
     impl DCXHeader {
         pub fn new(
             v1: u32,
@@ -253,9 +238,8 @@ pub mod header_structs {
                 _compression_level_pad: *b"\0\0\0",
                 version5: v5,
                 version6: v6,
-                unk5: 0u32,
+                unk4: 0u32,
                 version7: v7,
-                byte_order: ByteOrder::BigEndian
             }
         }
 
@@ -300,6 +284,7 @@ pub mod header_structs {
             self.compression_type
         }
     }
+    
     impl IO for DCXHeader {
         fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
             reader.assert_bytes(b"DCX\0")?;
@@ -338,7 +323,7 @@ pub mod header_structs {
 
             let version5 = reader.read_u32()?;
             let version6 = reader.read_u32()?;
-            reader.assert::<u32>(0u32)?; // unk5
+            reader.assert::<u32>(0u32)?; // unk4
             let version7 = reader.read_u32()?;
 
             Ok(Self::new(
@@ -360,7 +345,7 @@ pub mod header_structs {
             if buffer.len() < 68 {
                 return Err(BinaryReaderError::Custom("Invalid Header Size!".to_string()).into());
             }
-            Self::from_reader(&mut BinaryReader::from_bytes(buffer))
+            Self::from_reader(&mut BinaryReader::from(buffer, true, false))
         }
 
         fn from_path(path: &Path) -> Result<Self, FerrisoulsError> {
@@ -379,64 +364,42 @@ pub mod header_structs {
             Self::from_bytes(&buffer)
         }
 
-        // Converts self to Vec<u8>
-        fn to_bytes(&self) -> Result<Vec<u8>, FerrisoulsError> {
-            let mut buffer = [0u8; 68];
-            let mut offset = 0;
+        fn to_writer(&self) -> Result<BinaryWriter, FerrisoulsError> {
+            let mut writer = BinaryWriter::default();
 
-            fn write_u32_be(buffer: &mut [u8], offset: &mut usize, value: u32) {
-                buffer[*offset..*offset + 4].copy_from_slice(&value.to_be_bytes());
-                *offset += 4;
-            }
+            writer.write_bytes(b"DCX\0")?;
 
-            fn write_bytes<const N: usize>(
-                buffer: &mut [u8],
-                offset: &mut usize,
-                value: &[u8; N],
-            ) {
-                buffer[*offset..*offset + N].copy_from_slice(value);
-                *offset += N;
-            }
+            writer.write_u32(self.version1)?;
+            writer.write_u32(0x18u32)?;
+            writer.write_u32(0x24u32)?;
+            writer.write_u32(self.version2)?;
+            writer.write_u32(self.version3)?;
 
-            write_bytes(&mut buffer, &mut offset, &self.dcx);
+            writer.write_bytes(b"DCS\0")?;
 
-            write_u32_be(&mut buffer, &mut offset, self.version1);
-            write_u32_be(&mut buffer, &mut offset, self.unk1);
-            write_u32_be(&mut buffer, &mut offset, self.unk2);
-            write_u32_be(&mut buffer, &mut offset, self.version2);
-            write_u32_be(&mut buffer, &mut offset, self.version3);
+            writer.write_u32(self.decompressed_size as u32)?;
+            writer.write_u32(self.compressed_size as u32)?;
 
-            write_bytes(&mut buffer, &mut offset, &self.dcs);
+            writer.write_bytes(b"DCP\0")?;
+            writer.write_bytes(&self.compression_type)?;
 
-            write_u32_be(&mut buffer, &mut offset, self.decompressed_size);
-            write_u32_be(&mut buffer, &mut offset, self.compressed_size);
+            writer.write_u32(0x20u32)?;
 
-            write_bytes(&mut buffer, &mut offset, &self.dcp);
+            writer.write_u8(self.compression_level)?;
+            writer.write_bytes(&self._compression_level_pad)?;
 
-            write_bytes(&mut buffer, &mut offset, &self.compression_type);
+            writer.write_u32(self.version5)?;
+            writer.write_u32(self.version6)?;
+            writer.write_u32(0u32)?;
+            writer.write_u32(self.version7)?;
 
-            write_u32_be(&mut buffer, &mut offset, self.unk3);
+            debug_assert_eq!(writer.length(), 68);
 
-            buffer[offset] = self.compression_level;
-            offset += 1;
-
-            write_bytes(
-                &mut buffer,
-                &mut offset,
-                &self._compression_level_pad,
-            );
-
-            write_u32_be(&mut buffer, &mut offset, self.version5);
-            write_u32_be(&mut buffer, &mut offset, self.version6);
-            write_u32_be(&mut buffer, &mut offset, self.unk5);
-            write_u32_be(&mut buffer, &mut offset, self.version7);
-
-            debug_assert_eq!(offset, 68);
-
-            Ok(buffer.to_vec())
+            Ok(writer)
         }
 
     }
+    
     impl fmt::Debug for DCXHeader {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             let mut debug = f.debug_struct("DCXHeader");
@@ -447,6 +410,7 @@ pub mod header_structs {
             debug.finish()
         }
     }
+    
     impl fmt::Display for DCXHeader {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "{:#?}", self)
@@ -456,20 +420,20 @@ pub mod header_structs {
 
     pub struct DCXEdgeSubheader {
         dca: [u8; 4], // asserted b"DCA\0"
-        pub dca_size: usize,
+        pub dca_size: u32,
         egdt: [u8; 4], // asserted b"EgdT"
         unk1: u32, // asserted 0x10100
         unk2: u32, // asserted 0x24
         unk3: u32, // asserted 0x10
         unk4: u32, // asserted 0x10000
-        pub last_block_decompressed_size: usize,
-        pub egdt_size: usize,
-        pub chunk_count: usize,
+        pub last_block_decompressed_size: u32,
+        pub egdt_size: u32,
+        pub chunk_count: u32,
         unk5: u32, // asserted 0x100000
-        byte_order: ByteOrder
     }
+    
     impl DCXEdgeSubheader {
-        pub fn new(dca_size: usize, last_block_size: usize, egdt_size: usize, chunk_count: usize) -> Self {
+        pub fn new(dca_size: u32, last_block_size: u32, egdt_size: u32, chunk_count: u32) -> Self {
             Self {
                 dca: *b"DCA\0",
                 dca_size: dca_size,
@@ -482,15 +446,15 @@ pub mod header_structs {
                 egdt_size: egdt_size,
                 chunk_count: chunk_count,
                 unk5: 0x100000,
-                byte_order: ByteOrder::BigEndian
             }
         }
     }
+    
     impl IO for DCXEdgeSubheader {
         fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
             reader.assert_bytes(b"DCA\0")?;
             
-            let dca_size = reader.read_u32()? as usize;
+            let dca_size = reader.read_u32()?;
 
             reader.assert_bytes(b"EgdT")?;
 
@@ -499,53 +463,37 @@ pub mod header_structs {
             reader.assert(0x10u32)?; // unk3
             reader.assert(0x10000u32)?; // unk4
 
-            let last_block_size = reader.read_u32()? as usize;
-            let egdt_size = reader.read_u32()? as usize;
-            let chunk_count = reader.read_u32()? as usize;
+            let last_block_size = reader.read_u32()?;
+            let egdt_size = reader.read_u32()?;
+            let chunk_count = reader.read_u32()?;
 
             reader.assert(0x100000u32)?; // unk5
 
             Ok(Self::new(dca_size, last_block_size, egdt_size, chunk_count))
         }
 
-        fn to_bytes(&self) -> Result<Vec<u8>, FerrisoulsError> {
-            let mut buffer = [0u8; 56];
-            let mut offset = 0;
+        fn to_writer(&self) -> Result<BinaryWriter, FerrisoulsError> {
+            let mut writer = BinaryWriter::default();
 
-            fn write_u32_be(buffer: &mut [u8], offset: &mut usize, value: u32) {
-                buffer[*offset..*offset + 4].copy_from_slice(&value.to_be_bytes());
-                *offset += 4;
-            }
+            writer.write_bytes(b"DCA\0")?;
 
-            fn write_bytes<const N: usize>(
-                buffer: &mut [u8],
-                offset: &mut usize,
-                value: &[u8; N],
-            ) {
-                buffer[*offset..*offset + N].copy_from_slice(value);
-                *offset += N;
-            }
+            writer.write_u32(self.dca_size)?;
+            writer.write_bytes(b"EgdT")?;
 
+            writer.write_u32(0x10100u32)?;//unk1
+            writer.write_u32(0x24u32)?;//unk2
+            writer.write_u32(0x10u32)?;//unk3
+            writer.write_u32(0x10000u32)?;//unk4
 
-            write_bytes(&mut buffer, &mut offset, b"DCA\0");
-            
-            write_u32_be(&mut buffer, &mut offset, self.dca_size as u32);
-            write_bytes(&mut buffer, &mut offset, b"EgdT");
+            writer.write_u32(self.last_block_decompressed_size);
+            writer.write_u32(self.egdt_size);
+            writer.write_u32(self.chunk_count);
 
-            write_u32_be(&mut buffer, &mut offset, 0x10100u32);//unk1
-            write_u32_be(&mut buffer, &mut offset, 0x24u32);//unk2
-            write_u32_be(&mut buffer, &mut offset, 0x10u32);//unk3
-            write_u32_be(&mut buffer, &mut offset, 0x10000u32);//unk4
+            writer.write_u32(0x100000u32);//unk5
 
-            write_u32_be(&mut buffer, &mut offset, self.last_block_decompressed_size as u32);
-            write_u32_be(&mut buffer, &mut offset, self.egdt_size as u32);
-            write_u32_be(&mut buffer, &mut offset, self.chunk_count as u32);
+            debug_assert_eq!(writer.length(), 56);
 
-            write_u32_be(&mut buffer, &mut offset, 0x100000u32);//unk5
-
-            debug_assert_eq!(offset, 56);
-
-            Ok(buffer.to_vec())
+            Ok(writer)
         }
     }
 
@@ -568,6 +516,7 @@ pub enum DCXType {
     DCX_KRAK = 10, // DCX header, Oodle compression. Used in Sekiro and Elden Ring.
     DCX_ZSTD = 11, // ZSTD compression. Used in new ER regulation.
 }
+
 impl DCXType {
     pub fn has_dcx_extension(&self) -> bool {
         (*self as i32) >= 2
@@ -581,7 +530,7 @@ impl DCXType {
         file.read_exact(&mut header);
 
         Self::detect(
-            &mut BinaryReader::from_bytes(&header)
+            &mut BinaryReader::from(&header, true, false)
         )
     }
 
@@ -857,11 +806,11 @@ pub struct Compress;
 impl Decompress {
     ///Special decompression handling for DCX_EDGE type.
     pub fn dcx_edge(mut reader: BinaryReader, header: DCXHeader) -> Result<Vec<u8>, FerrisoulsError> {
-        let dca_start = reader.position() as usize;
+        let dca_start = reader.position() as u32;
         let subheader = DCXEdgeSubheader::from_reader(&mut reader)?;
 
         let hv3 = header.get_version_info().version3
-            .ok_or(DCXError::InvalidData("Header has no `version3`.".to_string()))? as usize;
+            .ok_or(DCXError::InvalidData("Header has no `version3`.".to_string()))?;
 
         if hv3 != 0x50 + subheader.chunk_count * 0x10 {
             return Err(DCXError::InvalidData(
@@ -869,7 +818,7 @@ impl Decompress {
             ).into());
         }
         let last_block = subheader.last_block_decompressed_size;
-        if last_block != 0x10000 && last_block != (header.decompressed_size() as usize % 0x10000) {
+        if last_block != 0x10000 && last_block != (header.decompressed_size() % 0x10000) {
             return Err(DCXError::InvalidData(
                 "DCX_EDGE header 'version3' field does not match expected value (0x50 + chunk_count * 0x10).".to_string()
             ).into());
@@ -914,7 +863,7 @@ impl Decompress {
                 0x10000
             } else {
                 last_block
-            };
+            } as usize;
 
             let decompressed_size = decompressed_chunk.len();
             if decompressed_size < expected_decompressed_size {
@@ -928,8 +877,8 @@ impl Decompress {
     }
 
     ///Takes compressed raw bytes and returns decompressed bytes and DCXType
-    pub fn raw(raw_buffer: &Vec<u8>, oodle: &OodleType) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
-        let mut reader = BinaryReader::from_bytes(raw_buffer);
+    pub fn raw(raw_buffer: &[u8], oodle: &OodleType) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
+        let mut reader = BinaryReader::from(raw_buffer, true, false);
 
         let dcx_type = DCXType::detect(&mut reader)?;
 
@@ -937,12 +886,12 @@ impl Decompress {
             DCXType::Unknown => return Err(DCXError::Unsupported("Cannot decompress unknown DCX type.".to_string()).into()),
 
             DCXType::DCP_DFLT => {
-                let dcpheader = DCPHeader::from_bytes(raw_buffer)?;
-                (reader.read_bytes(dcpheader.compressed_size() as usize)?, dcpheader.decompressed_size())
+                let dcpheader = DCPHeader::from_bytes(&raw_buffer)?;
+                (reader.read_bytes(dcpheader.compressed_size() as usize)?, dcpheader.decompressed_size() as usize)
             } 
 
             _=> {
-                let dcxheader = DCXHeader::from_bytes(raw_buffer)?;
+                let dcxheader = DCXHeader::from_bytes(&raw_buffer)?;
 
                 if dcx_type == DCXType::DCX_EDGE {
                     return Ok((Self::dcx_edge(reader, dcxheader)?, dcx_type));
@@ -1007,14 +956,14 @@ impl Decompress {
 
 impl Compress {
     ///Special compression handling for DCX_EDGE type.
-    pub fn dcx_edge(raw_buffer: &Vec<u8>) -> Result<Vec<u8>, FerrisoulsError> {
+    pub fn dcx_edge(raw_buffer: &[u8]) -> Result<Vec<u8>, FerrisoulsError> {
         let decompressed_size = raw_buffer.len();
 
         if decompressed_size == 0 {
             return Err(DCXError::InvalidData("Decompressed buffer is empty!".to_string()).into());
         }
 
-        let mut writer = BinaryWriter::new();
+        let mut writer = BinaryWriter::default();
 
         let mut chunk_count = decompressed_size / 0x10000;
         let last_block_decompressed_size = decompressed_size % 0x10000;
@@ -1038,17 +987,17 @@ impl Compress {
         );
         writer.append(header.to_bytes()?);
 
-        let dca_start = writer.position();
+        let dca_start = writer.position() as u32;
         let egdt_start = dca_start + 8; // after b'DCA\0' magic and 'dca_size'
 
         let egdt_size = 0x10*chunk_count + 36; // subheader is 44 bytes, subtract 8 for start of DCA struct
         let dca_size = egdt_size + 8;
 
         let mut subheader = DCXEdgeSubheader::new(
-            dca_size,
-            last_block_decompressed_size,
-            egdt_size,
-            chunk_count,
+            dca_size as u32,
+            last_block_decompressed_size as u32,
+            egdt_size as u32,
+            chunk_count as u32,
         );
         writer.append(subheader.to_bytes()?);
 
@@ -1060,8 +1009,8 @@ impl Compress {
 
         }
 
-        subheader.dca_size = writer.position() as usize - dca_start as usize;
-        subheader.egdt_size = writer.position() as usize - egdt_start as usize;
+        subheader.dca_size = writer.position() as u32 - dca_start;
+        subheader.egdt_size = writer.position() as u32 - egdt_start;
 
         let data_start = writer.position();
         let mut compressed_size = 0usize;
@@ -1099,7 +1048,7 @@ impl Compress {
     }
 
     ///Special compression handling for DCX_ZSTD type.
-    pub fn dcx_zstd(raw_buffer: &Vec<u8>, compression_level: i32) -> Result<Vec<u8>, FerrisoulsError> {
+    pub fn dcx_zstd(raw_buffer: &[u8], compression_level: i32) -> Result<Vec<u8>, FerrisoulsError> {
         let mut encoder = ZstdEnconder::new(Vec::new(), compression_level)?;
 
         encoder.set_parameter(zstd::zstd_safe::CParameter::WindowLog(16))?;
@@ -1110,7 +1059,7 @@ impl Compress {
     }
 
     ///Compresses raw bytes and returns them
-    pub fn raw(raw_buffer: &Vec<u8>, dcx_type: DCXType, oodle: &OodleType) -> Result<Vec<u8>, FerrisoulsError> {
+    pub fn raw(raw_buffer: &[u8], dcx_type: DCXType, oodle: &OodleType) -> Result<Vec<u8>, FerrisoulsError> {
         let mut compressed = match dcx_type {
             DCXType::Unknown => return Err(DCXError::Unsupported("Cannot compress unknown DCX type.".to_string()).into()),
 
@@ -1134,8 +1083,8 @@ impl Compress {
         match dcx_type {
             DCXType::DCP_DFLT => {
                 let header = DCPHeader::new(
-                    raw_buffer.len(), 
-                    compressed.len()
+                    raw_buffer.len() as u32, 
+                    compressed.len() as u32
                 ).to_bytes()?;
 
                 compressed.extend(header);
