@@ -563,7 +563,7 @@ impl OodleType {
 static OODLE: OnceLock<OodleType> = OnceLock::new();
 
 pub unsafe fn init_oodle(path: &Path) -> Result<(), String> {
-    let oodle = OodleType::get_oodle(path)?;
+    let oodle = unsafe { OodleType::get_oodle(path)? };
 
     OODLE
         .set(oodle)

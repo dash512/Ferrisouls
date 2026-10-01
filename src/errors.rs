@@ -56,6 +56,18 @@ pub enum DCXError {
 }
 
 impl DCXError {
+    pub fn custom(msg: impl Into<String>) -> Self {
+        Self::InvalidData(msg.into())
+    }
+
+    pub fn invalid_data(msg: impl Into<String>) -> Self {
+        Self::InvalidData(msg.into())
+    }
+
+    pub fn unsupported(msg: impl Into<String>) -> Self {
+        Self::InvalidData(msg.into())
+    }
+
     pub fn compression<E>(source: E) -> Self
     where
         E: std::error::Error + Send + Sync + 'static,

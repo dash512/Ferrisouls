@@ -818,149 +818,224 @@ impl Decompress {
         let dca_start = reader.position() as u32;
         let subheader = DCXEdgeSubheader::from_reader(&mut reader)?;
 
-        let hv3 = header.get_version_info().version3
-            .ok_or(DCXError::InvalidData("Header has no `version3`.".to_string()))?;
+        let hv3 = header
+            .get_version_info().version3
+            .ok_or(DCXError::invalid_data("Header has no `version3`."))?;
 
         if hv3 != 0x50 + subheader.chunk_count * 0x10 {
-            return Err(DCXError::InvalidData(
-                "DCX_EDGE header 'version3' field does not match expected value (0x50 + chunk_count * 0x10).".to_string()
-            ).into());
-        }
-        let last_block = subheader.last_block_decompressed_size;
-        if last_block != 0x10000 && last_block != (header.decompressed_size() % 0x10000) {
-            return Err(DCXError::InvalidData(
-                "DCX_EDGE header 'version3' field does not match expected value (0x50 + chunk_count * 0x10).".to_string()
-            ).into());
-        }
-        if subheader.egdt_size != 0x24 + subheader.chunk_count * 0x10 {
-            return Err(DCXError::InvalidData(
-                "DCX_EDGE subheader 'egdt_size' does not match expected value.".to_string()
+            return Err(DCXError::invalid_data(
+                "DCX_EDGE header 'version3' field does not match expected value (0x50 + chunk_count * 0x10)."
             ).into());
         }
 
-        let chunks_offset = dca_start + subheader.dca_size;
-        let mut decompressed = Vec::<u8>::new();
+        let last_block = if subheader.last_block_decompressed_size == 0 {
+            0x10000
+        } else {
+            subheader.last_block_decompressed_size
+        };
+
+        let expected_last_block = header.decompressed_size() % 0x10000;
+        if last_block != 0x10000 && last_block != expected_last_block {
+            return Err(DCXError::invalid_data(
+                "DCX_EDGE header 'version3' field does not match expected value (0x50 + chunk_count * 0x10)."
+            ).into());
+        }
+
+        if subheader.egdt_size != 0x24 + subheader.chunk_count * 0x10 {
+            return Err(DCXError::invalid_data(
+                "DCX_EDGE subheader 'egdt_size' does not match expected value."
+            ).into());
+        }
+
+        let chunks_offset = dca_start
+            .checked_add(subheader.dca_size)
+            .ok_or(DCXError::invalid_data("DCX_EDGE chunk data offset overflowed."))?;
+
+        let mut decompressed = Vec::with_capacity(header.decompressed_size() as usize);
 
         for i in 0..subheader.chunk_count {
-            reader.assert::<u32>(0u32)?; // 'zero' field
+            reader.assert::<u32>(0u32)?;
+
             let offset = reader.read_u32()?;
             let chunk_size = reader.read_u32()?;
             let is_compressed_int = reader.read_u32()?;
 
-            if !matches!(is_compressed_int, 0|1) {
-                return Err(DCXError::InvalidData("DCX_EDGE chunk 'is_compressed' field is not 0 or 1.".to_string()).into());
+            if !matches!(is_compressed_int, 0 | 1) {
+                return Err(DCXError::invalid_data("DCX_EDGE chunk 'is_compressed' field is not 0 or 1.").into());
             }
 
-            reader.set_position(chunks_offset as u64 + offset as u64);
+            let chunk_position = chunks_offset
+                .checked_add(offset)
+                .ok_or(DCXError::invalid_data("DCX_EDGE chunk offset overflowed."))?;
+
+            reader.set_position(chunk_position as u64);
             let chunk = reader.read_bytes(chunk_size as usize)?;
 
-            if is_compressed_int==0 {
-                decompressed.extend(chunk);
+            let expected_decompressed_size = if i < subheader.chunk_count - 1 {
+                0x10000usize
+            } else {
+                last_block as usize
+            };
+
+            if is_compressed_int == 0 {
+                if chunk.len() != expected_decompressed_size {
+                    return Err(DCXError::invalid_data(
+                        "DCX_EDGE uncompressed chunk size does not match expected size."
+                    ).into());
+                }
+
+                decompressed.extend_from_slice(&chunk);
                 continue;
             }
 
             // Decompress using DEFLATE method. We use and flush a new Decompressor object for each chunk.
             // Decompressed chunks may occasionally be smaller than expected (0x10000 or final chunk size), so we pad as
             // necessary after each one. - Grimrukh
-            let mut decompressor = flate2::Decompress::new(false); // raw deflate
-            let mut decompressed_chunk = Vec::new();
+            let mut decompressor = flate2::Decompress::new(false);
+            let mut decompressed_chunk = Vec::with_capacity(expected_decompressed_size);
 
-            decompressor.decompress_vec(&chunk, &mut decompressed_chunk, flate2::FlushDecompress::Finish,)
+            decompressor.decompress_vec(&chunk, &mut decompressed_chunk, flate2::FlushDecompress::Finish)
                 .map_err(|e| DCXError::decompression(e))?;
 
-            let expected_decompressed_size = if i < subheader.chunk_count - 1 {
-                0x10000
-            } else {
-                last_block
-            } as usize;
-
             let decompressed_size = decompressed_chunk.len();
-            if decompressed_size < expected_decompressed_size {
-                decompressed_chunk.extend(b"\0".repeat(expected_decompressed_size - decompressed_size)); // pad
+
+            if decompressed_size > expected_decompressed_size {
+                return Err(DCXError::invalid_data(
+                    "DCX_EDGE chunk decompressed to more data than expected."
+                ).into());
             }
 
-            decompressed.extend(decompressed_chunk);
+            if decompressed_size < expected_decompressed_size {
+                decompressed_chunk.resize(expected_decompressed_size, 0);
+            }
+
+            decompressed.extend_from_slice(&decompressed_chunk);
         }
+
+        if decompressed.len() != header.decompressed_size() as usize {
+            return Err(DCXError::invalid_data(
+                "Decompressed data length does not match expect value from header."
+            ).into());
+        }
+
         Ok(decompressed)
-        
     }
 
     ///Takes compressed raw bytes and returns decompressed bytes and DCXType
-    pub fn raw(raw_buffer: &[u8]) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
+    pub unsafe fn raw(raw_buffer: &[u8]) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
         let mut reader = BinaryReader::from(raw_buffer, true, false);
 
         let dcx_type = DCXType::detect(&mut reader)?;
+        reader.set_position(0);
 
-        let (compressed, decompressed_size) = match dcx_type {
-            DCXType::Unknown => return Err(DCXError::Unsupported("Cannot decompress unknown DCX type.".to_string()).into()),
+        match dcx_type {
+            DCXType::Unknown => Err(DCXError::unsupported("Cannot decompress unknown DCX type.").into()),
 
             DCXType::DCP_DFLT => {
-                let dcpheader = DCPHeader::from_bytes(&raw_buffer)?;
-                (reader.read_bytes(dcpheader.compressed_size() as usize)?, dcpheader.decompressed_size() as usize)
-            } 
 
-            _=> {
-                let dcxheader = DCXHeader::from_bytes(&raw_buffer)?;
+                let dcpheader = DCPHeader::from_reader(&mut reader)?;
 
-                if dcx_type == DCXType::DCX_EDGE {
-                    return Ok((Self::dcx_edge(reader, dcxheader)?, dcx_type));
+                let compressed = reader.read_bytes(dcpheader.compressed_size() as usize)?;
+
+                let mut decoder = ZlibDecoder::new(&compressed[..]);
+                let mut decompressed = Vec::new();
+                decoder.read_to_end(&mut decompressed)?;
+
+                let decompressed_size = dcpheader.decompressed_size() as usize;
+
+                if decompressed.len() != decompressed_size {
+                    return Err(DCXError::invalid_data("Decompressed data length does not match expect value from header.").into());
                 }
+
+                Ok((decompressed, dcx_type))
+            }
+
+            DCXType::DCX_EDGE => {
+                let dcxheader = DCXHeader::from_reader(&mut reader)?;
+                let decompressed = Self::dcx_edge(reader, dcxheader)?;
+
+                Ok((decompressed, dcx_type))
+            }
+
+            DCXType::DCX_KRAK => {
+                let dcxheader = DCXHeader::from_reader(&mut reader)?;
 
                 reader.assert_bytes(b"DCA\0")?;
                 reader.assert::<u32>(8)?;
 
-                (reader.read_bytes(dcxheader.compressed_size() as usize)?, dcxheader.decompressed_size() as usize)
-            }
-        };
+                let compressed_size = dcxheader.compressed_size() as usize;
+                let decompressed_size = dcxheader.decompressed_size() as usize;
 
-        let decompressed = match dcx_type {
-            DCXType::DCX_ZSTD => {
-                let mut decoder = ZstdDecoder::new(&compressed[..])?;
-                let mut decompressed = Vec::new();
+                let compressed = reader.read_bytes(compressed_size)?;
 
-                decoder.read_to_end(&mut decompressed)?;
-                decompressed
-            },
-
-            DCXType::DCX_KRAK => {
                 let oodle = get_oodle()?;
+                let mut decompressed = vec![0u8; decompressed_size];
 
-                let dcxheader = DCXHeader::from_reader(&mut reader)?; //TODO: dont recall
+                unsafe { oodle.decompress(&compressed, &mut decompressed)?; }
+
+                if decompressed.len() != decompressed_size {
+                    return Err(DCXError::invalid_data(
+                        "Decompressed data length does not match expect value from header."
+                    ).into());
+                }
+
+                Ok((decompressed, dcx_type))
+            }
+
+            DCXType::DCX_ZSTD => {
+                let dcxheader = DCXHeader::from_reader(&mut reader)?;
+
+                reader.assert_bytes(b"DCA\0")?;
+                reader.assert::<u32>(8)?;
 
                 let compressed_size = dcxheader.compressed_size() as usize;
                 let decompressed_size = dcxheader.decompressed_size() as usize;
 
-                //0x0->0x44 : main header struct
-                //0x44->0x48 : DCA\0 magic
-                //0x48->0x4C : dca header size. Always 8 unless "edge" type dcx where its variable based on chunks
-                let compressed = &raw_buffer[0x4C..0x4C + compressed_size];
+                let compressed = reader.read_bytes(compressed_size)?;
 
-                let mut decompressed_bytes: Vec<u8> = vec![0u8; decompressed_size];
-                oodle.decompress(&compressed, &mut decompressed_bytes)?; // returns amount written
-
-                decompressed_bytes
-            },
-            _=> {//Deflate types             
-                let mut decoder = ZlibDecoder::new(&compressed[..]);
-                let mut decompressed = Vec::new();
+                let mut decoder = ZstdDecoder::new(&compressed[..])?;
+                let mut decompressed = Vec::with_capacity(decompressed_size);
 
                 decoder.read_to_end(&mut decompressed)?;
-                decompressed
+
+                if decompressed.len() != decompressed_size {
+                    return Err(DCXError::invalid_data(
+                        "Decompressed data length does not match expect value from header."
+                    ).into());
+                }
+
+                Ok((decompressed, dcx_type))
             }
-        };
 
-        if decompressed.len() != decompressed_size {
-            return Err(DCXError::InvalidData("Decompressed data length does not match expect value from header.".to_string()).into())
+            _ => { //deflate types
+                let dcxheader = DCXHeader::from_reader(&mut reader)?;
+
+                reader.assert_bytes(b"DCA\0")?;
+                reader.assert::<u32>(8)?;
+
+                let compressed = reader.read_bytes(dcxheader.compressed_size() as usize)?;
+                let decompressed_size = dcxheader.decompressed_size() as usize;
+
+                let mut decoder = ZlibDecoder::new(&compressed[..]);
+                let mut decompressed = Vec::with_capacity(decompressed_size);
+
+                decoder.read_to_end(&mut decompressed)?;
+
+                if decompressed.len() != decompressed_size {
+                    return Err(DCXError::invalid_data(
+                        "Decompressed data length does not match expect value from header."
+                    ).into());
+                }
+
+                Ok((decompressed, dcx_type))
+            }
         }
-
-        Ok((decompressed, dcx_type))
-
     }
 
-    pub fn file(path: &Path) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
+    pub unsafe fn file(path: &Path) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
         let mut file_data = Vec::new();
         File::open(path)?.read_to_end(&mut file_data)?;
-        Self::raw(&file_data)
+        unsafe { Self::raw(&file_data) }
     }
 
 }
@@ -971,37 +1046,42 @@ impl Compress {
         let decompressed_size = raw_buffer.len();
 
         if decompressed_size == 0 {
-            return Err(DCXError::InvalidData("Decompressed buffer is empty!".to_string()).into());
+            return Err(DCXError::invalid_data("Decompressed buffer is empty!").into());
         }
 
         let mut writer = BinaryWriter::default();
 
-        let mut chunk_count = decompressed_size / 0x10000;
-        let last_block_decompressed_size = decompressed_size % 0x10000;
-        if last_block_decompressed_size > 0 {
-            chunk_count += 1 // add one more chunk for the remainder
-        }
+        let chunk_count = (decompressed_size + 0xFFFF) / 0x10000;
+        let remainder = decompressed_size % 0x10000;
+        let last_block_decompressed_size = if remainder == 0 {
+            0x10000
+        } else {
+            remainder
+        };
 
-        let version_info = DCXType::DCX_EDGE.get_version_info().unwrap();
+        let version_info = DCXType::DCX_EDGE
+            .get_version_info()
+            .unwrap();
 
         let mut header = DCXHeader::new(
-            version_info.version1, 
-            version_info.version2, 
-            (0x50 + chunk_count * 0x10) as u32, 
-            decompressed_size as u32, 
-            0u32, // reserve for patching later 
-            version_info.compression_type, 
-            version_info.compression_level.unwrap(), 
-            version_info.version5, 
-            version_info.version6, 
-            version_info.version7
+            version_info.version1,
+            version_info.version2,
+            (0x50 + chunk_count * 0x10) as u32,
+            decompressed_size as u32,
+            0u32,
+            version_info.compression_type,
+            version_info.compression_level.unwrap(),
+            version_info.version5,
+            version_info.version6,
+            version_info.version7,
         );
+
         writer.append(header.to_bytes()?);
 
         let dca_start = writer.position() as u32;
-        let egdt_start = dca_start + 8; // after b'DCA\0' magic and 'dca_size'
+        let egdt_start = dca_start + 8;
 
-        let egdt_size = 0x10*chunk_count + 36; // subheader is 44 bytes, subtract 8 for start of DCA struct
+        let egdt_size = 0x10 * chunk_count + 0x24;
         let dca_size = egdt_size + 8;
 
         let mut subheader = DCXEdgeSubheader::new(
@@ -1010,6 +1090,7 @@ impl Compress {
             egdt_size as u32,
             chunk_count as u32,
         );
+
         writer.append(subheader.to_bytes()?);
 
         for i in 0..chunk_count {
@@ -1017,45 +1098,51 @@ impl Compress {
             writer.reserve::<u32>(format!("offset{i}"))?;
             writer.reserve::<u32>(format!("size{i}"))?;
             writer.reserve::<u32>(format!("is_compressed{i}"))?;
-
         }
-
-        subheader.dca_size = writer.position() as u32 - dca_start;
-        subheader.egdt_size = writer.position() as u32 - egdt_start;
 
         let data_start = writer.position();
         let mut compressed_size = 0usize;
+
         for i in 0..chunk_count {
-            let decompressed_chunk_size  = if i < chunk_count - 1 {
+            let decompressed_chunk_size = if i < chunk_count - 1 {
                 0x10000
             } else {
                 last_block_decompressed_size
             };
 
-            let mut compressor = flate2::Compress::new(flate2::Compression::best(), false); // raw deflate
             let raw_offset = i * 0x10000;
-            let decompressed_chunk = &raw_buffer[raw_offset..raw_offset + decompressed_chunk_size];
+            let decompressed_chunk =
+                &raw_buffer[raw_offset..raw_offset + decompressed_chunk_size];
+
+            let mut compressor =
+                flate2::Compress::new(flate2::Compression::best(), false);
 
             let mut chunk = Vec::new();
 
-            compressor.compress_vec( decompressed_chunk, &mut chunk, flate2::FlushCompress::Finish)
+            compressor.compress_vec(decompressed_chunk, &mut chunk, flate2::FlushCompress::Finish)
                 .map_err(|e| DCXError::compression(e))?;
 
-            let chunk_compressed_size = chunk.len(); 
+            let chunk_compressed_size = chunk.len();
+            let is_compressed = chunk_compressed_size < decompressed_chunk_size;
 
             writer.fill(format!("offset{i}"), writer.position() - data_start);
             writer.fill(format!("size{i}"), chunk_compressed_size as u64);
-            writer.fill(format!("is_compressed{i}"), (chunk_compressed_size < decompressed_chunk_size) as u32);
-            compressed_size += chunk_compressed_size;
-            writer.append(chunk);
-            writer.pad_align(0x10);
+            writer.fill(format!("is_compressed{i}"), is_compressed as u32);
 
+            if is_compressed {
+                compressed_size += chunk_compressed_size;
+                writer.append(chunk);
+            } else {
+                compressed_size += decompressed_chunk_size;
+                writer.append(decompressed_chunk.to_vec());
+            }
+
+            writer.pad_align(0x10);
         }
 
-        writer.patch_u32(0x20, compressed_size as u32)?; // write to "reserved" `compressed` field
+        writer.patch_u32(0x20, compressed_size as u32)?;
 
         Ok(writer.into_inner())
-
     }
 
     ///Special compression handling for DCX_ZSTD type.
@@ -1071,62 +1158,70 @@ impl Compress {
     }
 
     ///Compresses raw bytes and returns them
-    pub fn raw(raw_buffer: &[u8], settings: &CompressSettings) -> Result<Vec<u8>, FerrisoulsError> {
-        let mut compressed = match settings {
-            CompressSettings::Unknown => return Err(DCXError::Unsupported("Cannot compress unknown DCX type.".to_string()).into()),
+    pub unsafe fn raw(raw_buffer: &[u8], settings: &CompressSettings) -> Result<Vec<u8>, FerrisoulsError> {
+        let compressed = match settings {
+            CompressSettings::Unknown => return Err(DCXError::unsupported("Cannot compress unknown DCX type.").into()),
 
-            CompressSettings::Null => raw_buffer.to_owned(),
+            CompressSettings::Null => {
+                return Ok(raw_buffer.to_owned());
+            }
 
-            CompressSettings::ZSTD(_,lvl) => Self::dcx_zstd(raw_buffer, *lvl)?,
+            CompressSettings::ZSTD(_, lvl) => {
+                Self::dcx_zstd(raw_buffer, *lvl)?
+            }
 
-            CompressSettings::DCXEDGE(_) => return Ok(Self::dcx_edge(raw_buffer)?),
+            CompressSettings::DCXEDGE(_) => {
+                return Self::dcx_edge(raw_buffer);
+            }
 
             CompressSettings::Oodle(_, osettings) => {
                 let oodle = get_oodle()?;
-                oodle.compress(raw_buffer, *osettings)?
-            },
+                unsafe { oodle.compress(raw_buffer, *osettings)? }
+            }
 
-            CompressSettings::DFLT(_,lvl) | CompressSettings::DCPDFLT(_,lvl) => { // deflate
-                let mut encoder = ZlibEncoder::new(Vec::new(), ZCompression::new(*lvl));
-                encoder.write_all(raw_buffer);
+            CompressSettings::DFLT(_, lvl)
+            | CompressSettings::DCPDFLT(_, lvl) => {
+                let mut encoder =
+                    ZlibEncoder::new(Vec::new(), ZCompression::new(*lvl));
+
+                encoder.write_all(raw_buffer)?;
                 encoder.finish()?
             }
         };
 
         match settings {
             CompressSettings::DCPDFLT(..) => {
-                let header = DCPHeader::new(
-                    raw_buffer.len() as u32, 
-                    compressed.len() as u32
-                ).to_bytes()?;
+                let header = DCPHeader::new(raw_buffer.len() as u32, compressed.len() as u32)
+                    .to_bytes()?;
 
-                compressed.extend(header);
-                return Ok(compressed);
+                let mut output = compressed;
+                output.extend_from_slice(&header);
 
+                Ok(output)
             }
 
-            // "bad" types are already impossible from previous match. Covers DFLT, KRAK, ZSTD, EDGE
-            CompressSettings::DFLT(dt,_) | CompressSettings::Oodle(dt,_)
-            | CompressSettings::ZSTD(dt,_) | CompressSettings::DCXEDGE(dt) => {
-                let vinfo = dt.get_version_info().unwrap();
-                let mut output_struct = DCXHeader::from_version_info(
-                    vinfo,
-                    compressed.len() as u32,
-                    raw_buffer.len() as u32
-                ).to_bytes()?;
+            CompressSettings::DFLT(dt, _) | CompressSettings::Oodle(dt, _)
+            | CompressSettings::ZSTD(dt, _) | CompressSettings::DCXEDGE(dt)
+             => {
+                let vinfo = dt
+                    .get_version_info()
+                    .ok_or(DCXError::invalid_data("Compression type has no version information."))?;
 
-                output_struct.extend_from_slice(b"DCA\0\x00\x00\x00\x08");
-                output_struct.extend_from_slice(&mut compressed);
+                let mut output = DCXHeader::from_version_info(vinfo, compressed.len() as u32, raw_buffer.len() as u32)
+                    .to_bytes()?;
 
-                return Ok(output_struct);
+                output.extend_from_slice(b"DCA\0\x00\x00\x00\x08");
+                output.extend_from_slice(&compressed);
+
+                Ok(output)
             }
 
-            _=> return Err(DCXError::Custom("This should never throw.".to_string()).into())
+            _ => Err(DCXError::custom("This should never throw.").into())
         }
-
     }
 
 }
+
 
 
 #[cfg(test)]
@@ -1162,7 +1257,7 @@ use super::*;
 
     #[test]
     fn test_compress() {
-        init_oodle(Path::new(".../tests/oo2core_6_win64.dll"));
+        unsafe { init_oodle(Path::new(".../tests/oo2core_6_win64.dll")); }
 
         let file = Path::new(".../tests/01_common.sblytbnd.dcx");
         let mut f = File::open(file).unwrap();
@@ -1170,12 +1265,12 @@ use super::*;
         f.read_to_end(&mut empty);
         println!("Successfully read {:?} bytes", empty.len());
 
-        let result = Decompress::file(file).unwrap();
+        let result = unsafe { Decompress::file(file).unwrap() };
         println!("Successfully decompressed {:?} bytes", result.0.len());
 
         let compsettings = CompressSettings::Oodle(DCXType::DCX_KRAK, OodleSettings::KRAK);
 
-        let new_result = Compress::raw(&result.0, &compsettings).unwrap();
+        let new_result = unsafe { Compress::raw(&result.0, &compsettings).unwrap() };
         println!("Successfully recompressed {:?} bytes", new_result.len());
 
         /*

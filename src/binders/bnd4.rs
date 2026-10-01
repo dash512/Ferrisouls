@@ -295,7 +295,7 @@ impl BND4Entry {
 
         let stored_data = if self.header.flags.is_compressed() {
             let compset = CompressSettings::Oodle(DCXType::DCX_KRAK, OodleSettings::KRAK);
-            Compress::raw(&self.data, &compset)
+            unsafe { Compress::raw(&self.data, &compset) }
                 .map_err(|e| BinaryWriterError::custom(e.to_string()))?
 
         } else {
@@ -398,7 +398,7 @@ impl IO for BND4 {
 
             let data = if entry_header.flags.is_compressed() {
                 // Use the compression information encoded by the flags.
-                let (data,_) = Decompress::raw(&stored_data)
+                let (data,_) = unsafe { Decompress::raw(&stored_data) }
                     .map_err(|e| BinaryReaderError::custom(e.to_string()))?;
 
                 let expected_size = entry_header.uncompressed_size
