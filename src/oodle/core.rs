@@ -478,7 +478,7 @@ pub enum OodleType {
 
 impl OodleType {
     ///Decompresses `compressed` into `decompressed`. Returns amount of bytes written.
-    pub fn decompress(&self, compressed: &[u8], decompressed: &mut [u8]) -> Result<usize, DCXError> {
+    pub unsafe fn decompress(&self, compressed: &[u8], decompressed: &mut [u8]) -> Result<usize, DCXError> {
         match self {
             OodleType::O26(inst) => unsafe {
                 inst.decompress(compressed,decompressed) 
@@ -493,7 +493,7 @@ impl OodleType {
     }
 
     ///Compresses and returns `input` as per `settings`.
-    pub fn compress(&self, input: &[u8], settings: OodleSettings) -> Result<Vec<u8>, DCXError> {
+    pub unsafe fn compress(&self, input: &[u8], settings: OodleSettings) -> Result<Vec<u8>, DCXError> {
         match self {
             OodleType::O26(inst) => unsafe {
                 let required_size = inst.get_compressed_buffer_size(input.len())?;
@@ -520,7 +520,7 @@ impl OodleType {
         }
     }
 
-    pub fn get_oodle(path: &Path) -> Result<OodleType, String> {
+    pub unsafe fn get_oodle(path: &Path) -> Result<OodleType, String> {
         match path.file_name().and_then(|name| name.to_str()) {
             Some("oo2core_6_win64.dll") => unsafe {
                 Oodle26::load(path)
@@ -562,7 +562,7 @@ impl OodleType {
 
 static OODLE: OnceLock<OodleType> = OnceLock::new();
 
-pub fn init_oodle(path: &Path) -> Result<(), String> {
+pub unsafe fn init_oodle(path: &Path) -> Result<(), String> {
     let oodle = OodleType::get_oodle(path)?;
 
     OODLE
@@ -574,10 +574,7 @@ pub fn get_oodle() -> Result<&'static OodleType, DCXError> {
     OODLE
         .get()
         .ok_or_else(|| {
-            DCXError::Custom(
-                "Oodle has not been loaded. Call init_oodle() first."
-                    .to_string()
-            )
+            DCXError::custom("Oodle has not been loaded. Call init_oodle() first.")
         })
 }
 
