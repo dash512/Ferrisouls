@@ -9,6 +9,7 @@ use crate::errors::{BinaryReaderError, FerrisoulsError};
 
 pub type Result<T> = std::result::Result<T, BinaryReaderError>;
 
+#[derive(Debug)]
 pub struct BinaryReader<'a> {
     data: Cursor<&'a [u8]>,
     pub big_endian: bool,

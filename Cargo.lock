@@ -15,6 +15,7 @@ dependencies = [
  "flate2",
  "hex-literal",
  "libloading",
+ "primes",
  "thiserror",
  "zstd",
 ]
@@ -247,6 +248,12 @@ name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
+
+[[package]]
+name = "primes"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0466ef49edd4a5a4bc9d62804a34e89366810bd8bfc3ed537101e3d099f245c5"
 
 [[package]]
 name = "proc-macro2"

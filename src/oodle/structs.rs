@@ -3,12 +3,12 @@ use crate::oodle::enums::{Compressor, CompressionLevel, Profile, Jobify};
 pub type OodleBool = i32;
 
 #[derive(Debug, Copy, Clone)]
-pub struct CompressSettings {
+pub struct OodleSettings {
     pub compressor: Compressor,
     pub level: CompressionLevel
 }
-impl CompressSettings {
-    pub const KRAK: CompressSettings = Self {
+impl OodleSettings {
+    pub const KRAK: OodleSettings = Self {
         compressor: Compressor::Kraken,
         level: CompressionLevel::Optimal5
     };

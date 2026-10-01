@@ -10,11 +10,13 @@ use crate::errors::{FerrisoulsError, BinaryWriterError};
 
 pub type Result<T> = std::result::Result<T, BinaryWriterError>;
 
+#[derive(Debug, Clone)]
 pub struct Reservation {
     offset: usize,
     length: usize,
 }
 
+#[derive(Debug, Clone)]
 pub struct BinaryWriter {
     data: Vec<u8>,
     position: usize,
@@ -198,6 +200,10 @@ impl BinaryWriter {
     }
 
     //region Alignment
+    pub fn pad(&mut self, count: usize) -> Result<()> {
+        self.write_bytes(&b"\0".repeat(count))
+    }
+
     pub fn pad_align(&mut self, align: u64) -> Result<()> {
         if align == 0 {
             return Ok(());

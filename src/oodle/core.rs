@@ -1,5 +1,5 @@
 
-use std::{ffi::c_void, path::{Path, PathBuf}};
+use std::{ffi::c_void, path::{Path, PathBuf}, sync::OnceLock};
 use libloading::{Library, Symbol};
 
 use crate::errors::DCXError;
@@ -12,7 +12,7 @@ pub trait Oodle {
 
     unsafe fn load(path: &Path) -> Result<Self, libloading::Error> where Self: Sized;
 
-    unsafe fn compress(&self, input: &[u8], output: &mut [u8], settings: &CompressSettings) -> Result<usize, DCXError>;
+    unsafe fn compress(&self, input: &[u8], output: &mut [u8], settings: &OodleSettings) -> Result<usize, DCXError>;
 
     ///Decompresses `input` data into `output`. Returns number of bytes written.
     unsafe fn decompress(&self, input: &[u8], output: &mut [u8]) -> Result<usize, DCXError>;
@@ -21,11 +21,11 @@ pub trait Oodle {
     unsafe fn get_compressed_buffer_size(&self, raw_size: usize) -> Result<usize, DCXError>;
 
     //Returns default compression options for given settings. (Compressor, CompressionLevel)
-    unsafe fn get_default_compress_options(&self, settings: &CompressSettings) -> *mut Self::CompressOptions;
+    unsafe fn get_default_compress_options(&self, settings: &OodleSettings) -> *mut Self::CompressOptions;
 
     //Returns the buffer size needed for decompression, optionally accounting for possible data corruption.
     //This is not typically needed for Fromsoft games, as decompressed size is stored in DCX headers.
-    unsafe fn get_decode_buffer_size(&self, raw_size: usize, corruptable: bool) -> Result<usize, DCXError>;
+    unsafe fn get_decode_buffer_size(&self, raw_size: usize, compressor: Compressor, corruptable: bool) -> Result<usize, DCXError>;
 
     // Same as `get_decode_buffer_size` but for overwriting compressed data in-memory without excessive additional allocation.
     unsafe fn get_decode_buffer_size_in_place(&self, compressor: Compressor, raw_size: usize, corruptable: bool) -> Result<usize, DCXError> {
@@ -96,7 +96,7 @@ impl Oodle for Oodle26 {
         })
     }
 
-    unsafe fn compress(&self, input: &[u8], output: &mut [u8], settings: &CompressSettings) -> Result<usize, DCXError> {
+    unsafe fn compress(&self, input: &[u8], output: &mut [u8], settings: &OodleSettings) -> Result<usize, DCXError> {
         let p_options = unsafe { self.get_default_compress_options(&settings) };
         unsafe { (*p_options).seekChunkReset = true as i32; } // required for the game to not crash --TK
         unsafe { (*p_options).seekChunkLen = 0x40000; } // already default, but included for authenticity --TK
@@ -156,13 +156,15 @@ impl Oodle for Oodle26 {
         unsafe { Ok( (self.lz_get_comp_size)(raw_size as isize) as usize ) }
     }
 
-    unsafe fn get_default_compress_options(&self, settings: &CompressSettings) -> *mut Self::CompressOptions {
+    unsafe fn get_default_compress_options(&self, settings: &OodleSettings) -> *mut Self::CompressOptions {
         unsafe { (self.lz_get_default_options)(settings.compressor, settings.level) }
     }
 
-    unsafe fn get_decode_buffer_size(&self, raw_size: usize, corruptable: bool) -> Result<usize, DCXError> {
+    ///Compressor argument is not needed in Oodle2.6, but the field is still required for transparency.
+    unsafe fn get_decode_buffer_size(&self, raw_size: usize, compressor: Compressor, corruptable: bool) -> Result<usize, DCXError> {
         unsafe { Ok( (self.lz_get_decode_size)(raw_size as isize, corruptable as i32) as usize ) }
     }
+    
 }
 
 
@@ -176,12 +178,6 @@ pub struct Oodle28 {
     lz_get_comp_size: o28::OodleLZ_GetCompressedBufferSizeNeeded,
     lz_get_decode_size: o28::OodleLZ_GetDecodeBufferSize,
     lz_get_scratchmem_bound: o28::OodleLZ_GetCompressScratchMemBound
-}
-
-impl Oodle28 {
-    pub fn set_compressor(mut self, compressor: Compressor) {
-        self.compressor = Some(compressor)
-    }
 }
 
 impl Oodle for Oodle28 {
@@ -239,7 +235,7 @@ impl Oodle for Oodle28 {
         })
     }
 
-    unsafe fn compress(&self, input: &[u8], output: &mut [u8], settings: &CompressSettings) -> Result<usize, DCXError> {
+    unsafe fn compress(&self, input: &[u8], output: &mut [u8], settings: &OodleSettings) -> Result<usize, DCXError> {
         let p_options = unsafe { self.get_default_compress_options(&settings) };
         unsafe { (*p_options).seekChunkReset = true as i32; } // required for the game to not crash --TK
         unsafe { (*p_options).seekChunkLen = 0x40000; } // already default, but included for authenticity --TK
@@ -305,20 +301,13 @@ impl Oodle for Oodle28 {
         }
     }
 
-    unsafe fn get_default_compress_options(&self, settings: &CompressSettings) -> *mut Self::CompressOptions {
+    unsafe fn get_default_compress_options(&self, settings: &OodleSettings) -> *mut Self::CompressOptions {
         unsafe { (self.lz_get_default_options)(settings.compressor, settings.level) }
     }
 
     ///Requires compressor to be set with `Oodle28.set_compressor()`
-    unsafe fn get_decode_buffer_size(&self, raw_size: usize, corruptable: bool) -> Result<usize, DCXError> {
-        match self.compressor {
-            None => Err(DCXError::Custom("Failed to get decode buffer size: compressor was not given. 
-            Try setting it with `set_compressor`.".to_string())),
-            Some(comp) => unsafe { 
-                Ok( (self.lz_get_decode_size)(comp, raw_size as isize, corruptable as i32) as usize )
-            }
-        }
-        
+    unsafe fn get_decode_buffer_size(&self, raw_size: usize, compressor: Compressor, corruptable: bool) -> Result<usize, DCXError> {
+        unsafe { Ok( (self.lz_get_decode_size)(compressor, raw_size as isize, corruptable as i32) as usize ) }        
     }
 
     // Get size of buffer required for compressed data. Never returns error.
@@ -339,12 +328,6 @@ pub struct Oodle29 {
     lz_get_comp_size: o29::OodleLZ_GetCompressedBufferSizeNeeded,
     lz_get_decode_size: o29::OodleLZ_GetDecodeBufferSize,
     lz_get_scratchmem_bound: o29::OodleLZ_GetCompressScratchMemBound
-}
-
-impl Oodle29 {
-    pub fn set_compressor(mut self, compressor: Compressor) {
-        self.compressor = Some(compressor)
-    }
 }
 
 impl Oodle for Oodle29 {
@@ -402,7 +385,7 @@ impl Oodle for Oodle29 {
         })
     }
 
-    unsafe fn compress(&self, input: &[u8], output: &mut [u8], settings: &CompressSettings) -> Result<usize, DCXError> {
+    unsafe fn compress(&self, input: &[u8], output: &mut [u8], settings: &OodleSettings) -> Result<usize, DCXError> {
         let p_options = unsafe { self.get_default_compress_options(&settings) };
         unsafe { (*p_options).seekChunkReset = true as i32; } // required for the game to not crash --TK
         unsafe { (*p_options).seekChunkLen = 0x40000; } // already default, but included for authenticity --TK
@@ -469,20 +452,13 @@ impl Oodle for Oodle29 {
     }
 
     ///This function takes no arguments as of Oodle2.9. The settings field is still required for transparency but isn't used.
-    unsafe fn get_default_compress_options(&self, settings: &CompressSettings) -> *mut Self::CompressOptions {
+    unsafe fn get_default_compress_options(&self, settings: &OodleSettings) -> *mut Self::CompressOptions {
         unsafe { (self.lz_get_default_options)() }
     }
 
     ///Requires compressor to be set with `Oodle28.set_compressor()`
-    unsafe fn get_decode_buffer_size(&self, raw_size: usize, corruptable: bool) -> Result<usize, DCXError> {
-        match self.compressor {
-            None => Err(DCXError::Custom("Failed to get decode buffer size: compressor was not given. 
-            Try setting it with `set_compressor`.".to_string())),
-            Some(comp) => unsafe { 
-                Ok( (self.lz_get_decode_size)(comp, raw_size as isize, corruptable as i32) as usize )
-            }
-        }
-        
+    unsafe fn get_decode_buffer_size(&self, raw_size: usize, compressor: Compressor, corruptable: bool) -> Result<usize, DCXError> {
+        unsafe { Ok( (self.lz_get_decode_size)(compressor, raw_size as isize, corruptable as i32) as usize ) }  
     }
 
     // Get size of buffer required for compressed data. Never returns error.
@@ -517,7 +493,7 @@ impl OodleType {
     }
 
     ///Compresses and returns `input` as per `settings`.
-    pub fn compress(&self, input: &[u8], settings: CompressSettings) -> Result<Vec<u8>, DCXError> {
+    pub fn compress(&self, input: &[u8], settings: OodleSettings) -> Result<Vec<u8>, DCXError> {
         match self {
             OodleType::O26(inst) => unsafe {
                 let required_size = inst.get_compressed_buffer_size(input.len())?;
@@ -581,6 +557,31 @@ impl OodleType {
         Err("Couldn't find Oodle".to_string())
     }
 }
+
+
+
+static OODLE: OnceLock<OodleType> = OnceLock::new();
+
+pub fn init_oodle(path: &Path) -> Result<(), String> {
+    let oodle = OodleType::get_oodle(path)?;
+
+    OODLE
+        .set(oodle)
+        .map_err(|_| "Oodle has already been initialized.".to_string())
+}
+
+pub fn get_oodle() -> Result<&'static OodleType, DCXError> {
+    OODLE
+        .get()
+        .ok_or_else(|| {
+            DCXError::Custom(
+                "Oodle has not been loaded. Call init_oodle() first."
+                    .to_string()
+            )
+        })
+}
+
+
 
 
 #[cfg(test)]

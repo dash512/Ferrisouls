@@ -13,8 +13,8 @@ use flate2::Compression as ZCompression;
 
 use crate::dcx;
 use crate::errors::{BinaryReaderError, DCXError, FerrisoulsError};
-use crate::oodle::core::{Oodle, Oodle26, Oodle28, Oodle29, OodleType};
-use crate::oodle::structs::CompressSettings;
+use crate::oodle::core::{Oodle, Oodle26, Oodle28, Oodle29, OodleType, get_oodle};
+use crate::oodle::structs::OodleSettings;
 use crate::binary::{BinaryReader, BinaryWriter, IO};
 use crate::binary::bytes::ByteOrder;
 use header_structs::*;
@@ -162,9 +162,7 @@ pub mod header_structs {
             )  
         }
 
-        fn to_writer(&self) -> Result<BinaryWriter, FerrisoulsError> {
-            let mut writer = BinaryWriter::default();
-
+        fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
             writer.write_bytes(b"DCP\0")?;
             writer.write_bytes(b"DFLT")?;
 
@@ -180,7 +178,7 @@ pub mod header_structs {
 
             debug_assert_eq!(writer.length(), 72);
 
-            Ok(writer)
+            Ok(())
         }
     }
 
@@ -364,9 +362,7 @@ pub mod header_structs {
             Self::from_bytes(&buffer)
         }
 
-        fn to_writer(&self) -> Result<BinaryWriter, FerrisoulsError> {
-            let mut writer = BinaryWriter::default();
-
+        fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
             writer.write_bytes(b"DCX\0")?;
 
             writer.write_u32(self.version1)?;
@@ -395,7 +391,7 @@ pub mod header_structs {
 
             debug_assert_eq!(writer.length(), 68);
 
-            Ok(writer)
+            Ok(())
         }
 
     }
@@ -472,9 +468,7 @@ pub mod header_structs {
             Ok(Self::new(dca_size, last_block_size, egdt_size, chunk_count))
         }
 
-        fn to_writer(&self) -> Result<BinaryWriter, FerrisoulsError> {
-            let mut writer = BinaryWriter::default();
-
+        fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
             writer.write_bytes(b"DCA\0")?;
 
             writer.write_u32(self.dca_size)?;
@@ -493,7 +487,7 @@ pub mod header_structs {
 
             debug_assert_eq!(writer.length(), 56);
 
-            Ok(writer)
+            Ok(())
         }
     }
 
@@ -800,6 +794,19 @@ impl DCXType {
 
 }
 
+
+#[derive(Debug)]
+pub enum CompressSettings {
+    Oodle(DCXType, OodleSettings),
+    DFLT(DCXType, u32), // zlib compression level
+    ZSTD(DCXType, i32), // zstd compression level
+    DCPDFLT(DCXType, u32), // zlib compression level
+    DCXEDGE(DCXType),
+    Null,
+    Unknown,
+}
+
+
 pub struct Decompress;
 pub struct Compress;
 
@@ -877,7 +884,7 @@ impl Decompress {
     }
 
     ///Takes compressed raw bytes and returns decompressed bytes and DCXType
-    pub fn raw(raw_buffer: &[u8], oodle: &OodleType) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
+    pub fn raw(raw_buffer: &[u8]) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
         let mut reader = BinaryReader::from(raw_buffer, true, false);
 
         let dcx_type = DCXType::detect(&mut reader)?;
@@ -914,6 +921,8 @@ impl Decompress {
             },
 
             DCXType::DCX_KRAK => {
+                let oodle = get_oodle()?;
+
                 let dcxheader = DCXHeader::from_reader(&mut reader)?; //TODO: dont recall
 
                 let compressed_size = dcxheader.compressed_size() as usize;
@@ -946,10 +955,10 @@ impl Decompress {
 
     }
 
-    pub fn file(path: &Path, oodle: &OodleType) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
+    pub fn file(path: &Path) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
         let mut file_data = Vec::new();
         File::open(path)?.read_to_end(&mut file_data)?;
-        Self::raw(&file_data, oodle)
+        Self::raw(&file_data)
     }
 
 }
@@ -1059,29 +1068,30 @@ impl Compress {
     }
 
     ///Compresses raw bytes and returns them
-    pub fn raw(raw_buffer: &[u8], dcx_type: DCXType, oodle: &OodleType) -> Result<Vec<u8>, FerrisoulsError> {
-        let mut compressed = match dcx_type {
-            DCXType::Unknown => return Err(DCXError::Unsupported("Cannot compress unknown DCX type.".to_string()).into()),
+    pub fn raw(raw_buffer: &[u8], settings: &CompressSettings) -> Result<Vec<u8>, FerrisoulsError> {
+        let mut compressed = match settings {
+            CompressSettings::Unknown => return Err(DCXError::Unsupported("Cannot compress unknown DCX type.".to_string()).into()),
 
-            DCXType::Null => raw_buffer.to_owned(),
+            CompressSettings::Null => raw_buffer.to_owned(),
 
-            DCXType::DCX_ZSTD => Self::dcx_zstd(raw_buffer, 15i32)?,
+            CompressSettings::ZSTD(_,lvl) => Self::dcx_zstd(raw_buffer, *lvl)?,
 
-            DCXType::DCX_EDGE => return Ok(Self::dcx_edge(raw_buffer)?),
+            CompressSettings::DCXEDGE(_) => return Ok(Self::dcx_edge(raw_buffer)?),
 
-            DCXType::DCX_KRAK => {
-                oodle.compress(raw_buffer, CompressSettings::KRAK)?
+            CompressSettings::Oodle(_, osettings) => {
+                let oodle = get_oodle()?;
+                oodle.compress(raw_buffer, *osettings)?
             },
 
-            _=> { // deflate
-                let mut encoder = ZlibEncoder::new(Vec::new(), ZCompression::new(7));
+            CompressSettings::DFLT(_,lvl) | CompressSettings::DCPDFLT(_,lvl) => { // deflate
+                let mut encoder = ZlibEncoder::new(Vec::new(), ZCompression::new(*lvl));
                 encoder.write_all(raw_buffer);
                 encoder.finish()?
             }
         };
 
-        match dcx_type {
-            DCXType::DCP_DFLT => {
+        match settings {
+            CompressSettings::DCPDFLT(..) => {
                 let header = DCPHeader::new(
                     raw_buffer.len() as u32, 
                     compressed.len() as u32
@@ -1092,8 +1102,10 @@ impl Compress {
 
             }
 
-            _=> { // "bad" types are already impossible from previous match. Covers DFLT, KRAK, ZSTD, EDGE
-                let vinfo = dcx_type.get_version_info().unwrap();
+            // "bad" types are already impossible from previous match. Covers DFLT, KRAK, ZSTD, EDGE
+            CompressSettings::DFLT(dt,_) | CompressSettings::Oodle(dt,_)
+            | CompressSettings::ZSTD(dt,_) | CompressSettings::DCXEDGE(dt) => {
+                let vinfo = dt.get_version_info().unwrap();
                 let mut output_struct = DCXHeader::from_version_info(
                     vinfo,
                     compressed.len() as u32,
@@ -1105,6 +1117,8 @@ impl Compress {
 
                 return Ok(output_struct);
             }
+
+            _=> return Err(DCXError::Custom("This should never throw.".to_string()).into())
         }
 
     }
@@ -1114,7 +1128,9 @@ impl Compress {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::oodle::core::init_oodle;
+
+use super::*;
 
     #[test]
     fn get_dcxtype_from_file() -> Result<(), FerrisoulsError> {
@@ -1143,12 +1159,7 @@ mod tests {
 
     #[test]
     fn test_compress() {
-        let oodle = unsafe {
-            OodleType::get_oodle(Path::new(
-                ".../tests/oo2core_6_win64.dll"
-            ))
-            .unwrap()
-        };
+        init_oodle(Path::new(".../tests/oo2core_6_win64.dll"));
 
         let file = Path::new(".../tests/01_common.sblytbnd.dcx");
         let mut f = File::open(file).unwrap();
@@ -1156,10 +1167,12 @@ mod tests {
         f.read_to_end(&mut empty);
         println!("Successfully read {:?} bytes", empty.len());
 
-        let result = Decompress::file(file, &oodle).unwrap();
+        let result = Decompress::file(file).unwrap();
         println!("Successfully decompressed {:?} bytes", result.0.len());
 
-        let new_result = Compress::raw(&result.0, DCXType::DCX_KRAK, &oodle).unwrap();
+        let compsettings = CompressSettings::Oodle(DCXType::DCX_KRAK, OodleSettings::KRAK);
+
+        let new_result = Compress::raw(&result.0, &compsettings).unwrap();
         println!("Successfully recompressed {:?} bytes", new_result.len());
 
         /*
