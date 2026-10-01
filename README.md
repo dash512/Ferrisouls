@@ -13,5 +13,8 @@ This project is under GPL3 because Soulstruct is, even if there's no actual Soul
  - WIP swizzle/deswizzle functionality for console textures
     - Decently optimized morton/z-order algorithms for 8x8 tiles
  - DXGI enums with important info and descriptions
- - Basic binary readers and writers (not yet fully implemented)
- - Implementation of fromsoft's string hashing algorithm (ported from Grimrukh's SoulStruct)
+ - Basic binary readers and writers
+ - Regulation decryption (not fully parsed as of now)
+ - Basic outline for TPF handling, not ready for use yet
+ - Raw parsing and handling for FMGs
+ - Basic parsing for all major non-split binder versions
