@@ -31,7 +31,7 @@ pub struct BinderPathHash {
 }
 
 impl BinderHashTable {
-    fn validate(&self) -> Result<(), FerrisoulsError> {
+    fn validate(&self) -> Result<(), BinaryWriterError> {
         let mut expected_index = 0i32;
 
         for group in &self.groups {
@@ -41,13 +41,13 @@ impl BinderHashTable {
                         "Invalid hash group index: expected {}, got {}",
                         expected_index, group.index
                     )
-                ).into());
+                ));
             }
 
             if group.length < 0 {
                 return Err(BinaryWriterError::Custom(
                     "Hash group has negative length.".to_string()
-                ).into());
+                ));
             }
 
             expected_index += group.length;
@@ -60,7 +60,7 @@ impl BinderHashTable {
                     expected_index,
                     self.hashes.len()
                 )
-            ).into());
+            ));
         }
 
         Ok(())
@@ -69,7 +69,7 @@ impl BinderHashTable {
 }
 
 impl IO for BinderHashTable {
-    fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         let hashes_offset = reader.read_u64()?;
 
         let group_count = reader.read_u32()? as usize;
@@ -116,10 +116,10 @@ impl IO for BinderHashTable {
         })
     }
 
-    fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         self.validate()?;
         
-        writer.reserve("HashesOffset".to_string(), 8)?;
+        writer.reserve::<u64>("HashesOffset".to_string())?;
 
         writer.write_u32(self.groups.len() as u32)?;
 
@@ -146,7 +146,7 @@ impl IO for BinderHashTable {
 }
 
 impl BinderHashTable {
-    pub fn from_names(names: &[String]) -> Result<Self, FerrisoulsError> {
+    pub fn from_names(names: &[String]) -> Result<Self, BinaryWriterError> {
         let group_count = find_hash_group_count(names.len())?;
 
         let mut buckets: Vec<Vec<BinderPathHash>> = (0..group_count)
@@ -196,7 +196,7 @@ impl BinderHashTable {
 }
 
 
-fn find_hash_group_count(file_count: usize) -> Result<usize, FerrisoulsError> {
+fn find_hash_group_count(file_count: usize) -> Result<usize, BinaryWriterError> {
     let start = file_count / 7;
 
     for p in start..=100_000 {
@@ -205,9 +205,7 @@ fn find_hash_group_count(file_count: usize) -> Result<usize, FerrisoulsError> {
         }
     }
 
-    Err(BinaryWriterError::custom(
-        "Could not determine hash group count.".to_string()
-    ).into())
+    Err(BinaryWriterError::custom("Could not determine hash group count."))
 }
 
 

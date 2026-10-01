@@ -22,7 +22,7 @@ pub struct BND3Header {
 }
 
 impl IO for BND3Header {
-    fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         reader.assert_bytes(b"BND3")?;
 
         let signature = reader.read_bytes(8)?
@@ -67,7 +67,7 @@ impl IO for BND3Header {
         )
     }
 
-    fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.big_endian = self.big_endian || self.flags.contains(BinderFlags::IS_BIG_ENDIAN);
 
         writer.write_bytes(b"BND3")?;
@@ -109,7 +109,7 @@ pub struct BND3EntryHeader {
 }
 
 impl BND3EntryHeader {
-    pub fn from_reader(reader: &mut BinaryReader, bndflags: BinderFlags, bit_big_endian: bool) -> Result<Self, FerrisoulsError> {
+    pub fn from_reader(reader: &mut BinaryReader, bndflags: BinderFlags, bit_big_endian: bool) -> Result<Self, BinaryReaderError> {
         let flags = EntryFlags::from_byte(reader.read_u8()?, bit_big_endian);
         
         reader.assert_bytes(b"\0\0\0")?;
@@ -153,7 +153,7 @@ impl BND3EntryHeader {
         )
     }
 
-    pub fn to_writer(&self, writer: &mut BinaryWriter, parent: &BND3Header) -> Result<(), FerrisoulsError> {
+    pub fn to_writer(&self, writer: &mut BinaryWriter, parent: &BND3Header) -> Result<(), BinaryWriterError> {
         writer.write_u8(self.flags.to_byte(parent.bit_big_endian))?;
 
         writer.pad(3)?;
@@ -173,13 +173,7 @@ impl BND3EntryHeader {
                 writer.write_u32(value)?;
             }
 
-            _ => return Err(
-                    FerrisoulsError::BinaryWriter(
-                        BinaryWriterError::InvalidData(
-                            "Invalid data offset width for BND3 format.".to_string()
-                        )
-                    )
-                )
+            _ => return Err(BinaryWriterError::invalid_data("Invalid data offset width for BND3 format."))
         }
 
         if parent.flags.has_ids() {
@@ -188,11 +182,7 @@ impl BND3EntryHeader {
 
         if parent.flags.has_names() {
             let offset = self.name_offset.ok_or_else(|| {
-                FerrisoulsError::BinaryWriter(
-                    BinaryWriterError::InvalidData(
-                        "BND3 entry requires a name offset.".to_string()
-                    )
-                )
+                BinaryWriterError::invalid_data("BND3 entry requires a name offset.")
             })?;
 
             writer.write_u32(offset)?;
@@ -222,15 +212,12 @@ pub struct BND3 {
     pub entries: Vec<BND3Entry>
 }
 
-impl BND3 {
-    pub fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+impl IO for BND3 {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         let header = BND3Header::from_reader(reader)?;
 
         if header.entry_count < 0 {
-            return Err(BinaryReaderError::InvalidData(
-                    "Invalid BND3 entry count.".to_string()
-                    ).into()
-                );
+            return Err(BinaryReaderError::invalid_data("Invalid BND3 entry count."));
         }
 
         let mut entries = Vec::with_capacity(header.entry_count as usize);
@@ -241,10 +228,7 @@ impl BND3 {
             let data_offset = match entry_header.data_offset {
                 VariableUInt::ULong(value) => value,
                 VariableUInt::UInt(value) => value as u64,
-                _=> {return Err(BinaryReaderError::InvalidData(
-                        "Data offset should be u32 or u64.".to_string()
-                        ).into()
-                    );}
+                _=> {return Err(BinaryReaderError::invalid_data("Data offset should be u32 or u64."));}
             };
 
             reader.step_in(data_offset)?;
@@ -262,7 +246,7 @@ impl BND3 {
         )
     }
 
-    pub fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         self.header.entry_count = self.entries.len() as i32;
         self.header.entry_headers_end = 0;
 

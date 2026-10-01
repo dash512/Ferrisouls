@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::fs::{File};
 
-use zstd::{Decoder as ZstdDecoder, Encoder as ZstdEnconder};
+use zstd::{Decoder as ZstdDecoder, Encoder as ZstdEncoder};
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression as ZCompression;
@@ -21,7 +21,9 @@ use header_structs::*;
 
 
 pub mod header_structs {
-    use super::*;
+    use crate::errors::BinaryWriterError;
+
+use super::*;
      
      ///Info struct containing the variable fields in a DCX file's header
     pub struct DCXVersionInfo {
@@ -140,7 +142,7 @@ pub mod header_structs {
     }
     
     impl IO for DCPHeader {
-        fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+        fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
             reader.assert_bytes(b"DCP\0")?;
             reader.assert_bytes(b"DFLT")?;
             let unks: Vec<u32> = reader.read_vec(6)?;
@@ -162,7 +164,7 @@ pub mod header_structs {
             )  
         }
 
-        fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+        fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
             writer.write_bytes(b"DCP\0")?;
             writer.write_bytes(b"DFLT")?;
 
@@ -284,7 +286,7 @@ pub mod header_structs {
     }
     
     impl IO for DCXHeader {
-        fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+        fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
             reader.assert_bytes(b"DCX\0")?;
 
             let version1 = reader.read_u32()?;
@@ -311,7 +313,7 @@ pub mod header_structs {
             ) {
                 return Err(BinaryReaderError::Custom(
                     format!("Compression type `{:?}` is Invalid!", compression_type)
-                ).into());
+                ));
             }
 
             reader.assert::<u32>(0x20)?; //unk3
@@ -339,14 +341,14 @@ pub mod header_structs {
         }
 
         // Expects a 68 byte header from a file, which is then parsed into a DCXHeader instance
-        fn from_bytes(buffer: &[u8]) -> Result<Self, FerrisoulsError> {
+        fn from_bytes(buffer: &[u8]) -> Result<Self, BinaryReaderError> {
             if buffer.len() < 68 {
-                return Err(BinaryReaderError::Custom("Invalid Header Size!".to_string()).into());
+                return Err(BinaryReaderError::custom("Invalid Header Size!"));
             }
             Self::from_reader(&mut BinaryReader::from(buffer, true, false))
         }
 
-        fn from_path(path: &Path) -> Result<Self, FerrisoulsError> {
+        fn from_path(path: &Path) -> Result<Self, BinaryReaderError> {
             let file = File::open(path)?;
 
             let mut buffer = [0u8; 68];
@@ -362,7 +364,7 @@ pub mod header_structs {
             Self::from_bytes(&buffer)
         }
 
-        fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+        fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
             writer.write_bytes(b"DCX\0")?;
 
             writer.write_u32(self.version1)?;
@@ -447,7 +449,7 @@ pub mod header_structs {
     }
     
     impl IO for DCXEdgeSubheader {
-        fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+        fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
             reader.assert_bytes(b"DCA\0")?;
             
             let dca_size = reader.read_u32()?;
@@ -468,7 +470,7 @@ pub mod header_structs {
             Ok(Self::new(dca_size, last_block_size, egdt_size, chunk_count))
         }
 
-        fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+        fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
             writer.write_bytes(b"DCA\0")?;
 
             writer.write_u32(self.dca_size)?;
@@ -1012,9 +1014,9 @@ impl Compress {
 
         for i in 0..chunk_count {
             writer.write_u32(0);
-            writer.reserve(format!("offset{i}"), 32)?;
-            writer.reserve(format!("size{i}"), 32)?;
-            writer.reserve(format!("is_compressed{i}"), 32)?;
+            writer.reserve::<u32>(format!("offset{i}"))?;
+            writer.reserve::<u32>(format!("size{i}"))?;
+            writer.reserve::<u32>(format!("is_compressed{i}"))?;
 
         }
 
@@ -1058,11 +1060,12 @@ impl Compress {
 
     ///Special compression handling for DCX_ZSTD type.
     pub fn dcx_zstd(raw_buffer: &[u8], compression_level: i32) -> Result<Vec<u8>, FerrisoulsError> {
-        let mut encoder = ZstdEnconder::new(Vec::new(), compression_level)?;
+        let mut encoder = ZstdEncoder::new(Vec::new(), compression_level)?;
 
         encoder.set_parameter(zstd::zstd_safe::CParameter::WindowLog(16))?;
         encoder.include_checksum(false)?;
 
+        encoder.write_all(raw_buffer)?;
         let compressed = encoder.finish()?;
         Ok(compressed)
     }

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use encoding_rs::SHIFT_JIS;
+use md5::{Digest, Md5};
 
 use crate::errors::{FerrisoulsError, BinaryWriterError};
 
@@ -375,6 +376,36 @@ impl BinaryWriter {
         }
     }
 
+    pub fn reserve_varint(&mut self, name: String) -> Result<()> {
+        if self.varint_long {
+            self.reserve::<i64>(name)?;
+        } else {
+            self.reserve::<i32>(name)?;
+        };
+
+        Ok(())
+    }
+
+    pub fn fill_varint(&mut self, name: String, value: i64) -> Result<()> {
+        let res = self.reservations.get(&name)
+            .ok_or(BinaryWriterError::Custom("Reservation doesn't exist!".to_string()))?;
+
+        let old_position = self.position();
+
+        self.set_position(res.offset as u64)?;
+
+        if self.varint_long {
+            self.write::<i64>(value)?;
+        } else {
+            self.write::<i32>(value as i32)?;
+        }
+        self.set_position(old_position)?;
+
+        self.reservations.remove(&name);
+
+        Ok(())
+    }
+   
     //region leb128/7bit ints
 
     pub fn write_leb128_u64(&mut self, mut value: u64) -> Result<()> {
@@ -486,7 +517,7 @@ impl BinaryWriter {
 
     //region shift-jis
 
-    pub fn write_shift_jis(&mut self, value: &str) -> Result<()> {
+    pub fn write_shift_jis(&mut self, value: &str, terminate: bool) -> Result<()> {
         let (encoded, _, had_errors) = SHIFT_JIS.encode(value);
 
         if had_errors {
@@ -496,7 +527,11 @@ impl BinaryWriter {
         }
 
         self.write_bytes(&encoded)?;
-        self.write_u8(0)
+
+        if terminate {
+            self.write_u8(0)?;
+        }
+        Ok(())
     }
 
     pub fn write_shift_jis_fixed(
@@ -548,14 +583,17 @@ impl BinaryWriter {
 
     //region utf16
 
-    pub fn write_utf16(&mut self, value: &str) -> Result<()> {
+    pub fn write_utf16(&mut self, value: &str, terminate: bool) -> Result<()> {
         let units = value.encode_utf16();
 
         for unit in units {
             self.write_u16(unit)?;
         }
 
-        self.write_u16(0)
+        if terminate {
+            self.write_u16(0)?;
+        }
+        Ok(())
     }
 
     pub fn write_utf16_fixed(
@@ -636,8 +674,9 @@ impl BinaryWriter {
 
     //region Reserves and patches
 
-    pub fn reserve(&mut self, name: String, size: usize) -> Result<u64> {
+    pub fn reserve<T: Writable>(&mut self, name: String) -> Result<u64> {
         let offset = self.position();
+        let size = std::mem::size_of::<T>();
 
         self.write_zeros(size)?;
 
@@ -704,6 +743,16 @@ impl BinaryWriter {
     ) -> Result<()> {
         self.write_u64_at(offset, value)
     }
+
+    //region Hashing
+    pub fn prepend_md5_hash(&mut self) -> Result<()> {
+        let mut hasher = Md5::new();
+        hasher.update(self.data.clone());
+        let hash = hasher.finalize();
+        self.data.splice(0..0, hash);
+        Ok(())
+    }
+
 }
 
 impl Default for BinaryWriter {

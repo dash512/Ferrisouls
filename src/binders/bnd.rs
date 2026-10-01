@@ -1,6 +1,6 @@
 use super::{BinderFlags, EntryFlags};
 use crate::binary::{IO, BinaryReader, BinaryWriter, bytes::VariableUInt};
-use crate::errors::{BinaryWriterError, FerrisoulsError};
+use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 
 
 #[derive(Debug, Clone)]
@@ -22,7 +22,7 @@ pub struct BNDHeader {
 }
 
 impl IO for BNDHeader {
-    fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         reader.assert_bytes(b"BND\0")?;
 
         reader.assert(0xFFFFu16)?;
@@ -33,9 +33,9 @@ impl IO for BNDHeader {
 
         let entry_count = reader.read_i32()?;
         if entry_count < 0 {
-            return Err(BinaryWriterError::Custom(
+            return Err(BinaryReaderError::Custom(
                     format!("Invalid BND entry count: {}", entry_count)
-                ).into()
+                )
             );
         }
 
@@ -62,7 +62,7 @@ impl IO for BNDHeader {
         )
     }
 
-    fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.write_bytes(b"BND\0")?;
 
         writer.write_u16(0xFFFFu16)?;
@@ -95,7 +95,7 @@ pub struct BNDEntryHeader {
 }
 
 impl BNDEntryHeader {
-    pub fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+    pub fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         let entry_id = reader.read_i32()?;
         let data_offset = reader.read_u32()?;
         let file_size = reader.read_u32()?;
@@ -121,14 +121,14 @@ impl BNDEntryHeader {
         )
     }
 
-    pub fn to_writer(&self, writer: &mut BinaryWriter, index: usize) -> Result<(), FerrisoulsError> {
+    pub fn to_writer(&mut self, writer: &mut BinaryWriter, index: usize) -> Result<(), BinaryWriterError> {
         writer.write_i32(self.entry_id)?;
 
-        writer.reserve(format!("FileOffset{}", index), 4)?;
+        writer.reserve::<u32>(format!("FileOffset{}", index))?;
 
         writer.write_u32(self.file_size)?;
 
-        writer.reserve(format!("FileName{}", index), 4)?;
+        writer.reserve::<u32>(format!("FileName{}", index))?;
 
         Ok(())
     }
@@ -144,7 +144,7 @@ pub struct BNDEntry {
 }
 
 impl BNDEntry {
-    pub fn from_reader(reader: &mut BinaryReader, header: BNDEntryHeader) -> Result<Self, FerrisoulsError> {
+    pub fn from_reader(reader: &mut BinaryReader, header: BNDEntryHeader) -> Result<Self, BinaryReaderError> {
         reader.step_in(header.data_offset as u64)?;
         let data = reader.read_bytes(header.file_size as usize)?;
         reader.step_out()?;
@@ -157,7 +157,7 @@ impl BNDEntry {
         )
     }
 
-    pub fn to_writer(&mut self, writer: &mut BinaryWriter, index: usize) -> Result<(), FerrisoulsError> {
+    pub fn to_writer(&mut self, writer: &mut BinaryWriter, index: usize) -> Result<(), BinaryWriterError> {
         writer.fill::<u32>(format!("FileOffset{}", index), writer.position() as u32)?;
 
         self.header.data_offset = writer.position() as u32;
@@ -179,15 +179,15 @@ pub struct BND {
 }
 
 impl BND {
-    fn read_header(reader: &mut BinaryReader) -> Result<(BNDHeader, String, Vec<BNDEntryHeader>), FerrisoulsError> {
+    fn read_header(reader: &mut BinaryReader) -> Result<(BNDHeader, String, Vec<BNDEntryHeader>), BinaryReaderError> {
         let header = BNDHeader::from_reader(reader)?;
 
         let root_file_path =
             if header.root_path_offset != 0 {
                 if header.root_path_offset < 0 {
-                    return Err(BinaryWriterError::Custom(
+                    return Err(BinaryReaderError::Custom(
                             format!("Invalid BND root path offset: {}", header.root_path_offset)
-                        ).into()
+                        )
                     );
                 }
 
@@ -216,7 +216,7 @@ impl BND {
         )
     }
 
-    fn from_reader(&self, reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+    fn from_reader(&self, reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         let (header, root_file_path, entry_headers) =
             Self::read_header(reader)?;
 
@@ -237,7 +237,7 @@ impl BND {
         )
     }
 
-    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.write_bytes(b"BND\0")?;
 
         writer.write_u16(0xFFFFu16);
@@ -245,11 +245,11 @@ impl BND {
 
         writer.write_i32(self.header.version)?;
 
-        writer.reserve("FileSize".to_string(), 4)?;
+        writer.reserve::<u32>("FileSize".to_string())?;
 
         writer.write_i32(self.entries.len() as i32)?;
 
-        writer.reserve("RootFilePath".to_string(), 4)?;
+        writer.reserve::<u32>("RootFilePath".to_string())?;
 
         writer.write_u16(self.header.format0)?;
         writer.write_u16(self.header.format1)?;
@@ -257,7 +257,7 @@ impl BND {
         writer.write_u32(0)?;
 
         //file headers
-        for (index, entry) in self.entries.iter().enumerate() {
+        for (index, entry) in self.entries.iter_mut().enumerate() {
             entry.header.to_writer(writer, index)?;
         }
 
@@ -265,7 +265,7 @@ impl BND {
         if self.root_file_path != "" {
             writer.fill::<i32>("RootFilePath".to_string(), writer.position() as i32)?;
 
-            writer.write_shift_jis(&self.root_file_path)?;
+            writer.write_shift_jis(&self.root_file_path, true)?;
         }
         else {
             writer.fill::<i32>("RootFilePath".to_string(), 0)?;
@@ -275,7 +275,7 @@ impl BND {
         for (index, entry) in self.entries.iter().enumerate() {
             writer.fill::<i32>(format!("FileName{}", index), writer.position() as i32)?;
 
-            writer.write_shift_jis(&entry.header.name)?;
+            writer.write_shift_jis(&entry.header.name, true)?;
         }
 
         writer.pad(0x10)?;

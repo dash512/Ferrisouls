@@ -11,7 +11,7 @@ pub type Result<T> = std::result::Result<T, BinaryReaderError>;
 
 #[derive(Debug)]
 pub struct BinaryReader<'a> {
-    data: Cursor<&'a [u8]>,
+    pub data: Cursor<&'a [u8]>,
     pub big_endian: bool,
     pub varint_long: bool,
 
@@ -385,6 +385,15 @@ impl<'a> BinaryReader<'a> {
         }
     }
 
+    pub fn assert_varint(&mut self, value: i64) -> Result<i64> {
+        let read = self.read_varint()?;
+        if read != value {
+            return Err(BinaryReaderError::InvalidData(
+                format!("Expected {}, found {}", value, read)
+            ))
+        }
+        Ok(read)
+    }
     //region LEB128 / 7-bit ints
 
     pub fn read_leb128_u64(&mut self) -> Result<u64> {

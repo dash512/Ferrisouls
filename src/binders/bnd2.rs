@@ -73,7 +73,7 @@ pub struct BND2Header {
 }
 
 impl IO for BND2Header {
-    fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         reader.big_endian = false;
 
         reader.assert_bytes(b"BND\0")?;
@@ -91,13 +91,14 @@ impl IO for BND2Header {
         let base_dir_offset = reader.read_u32()?;
         let alignment_size = reader.read_u16()?;
 
-        let path_mode = BND2FilePathMode::try_from(reader.read_u8()?)?;
+        let path_mode = BND2FilePathMode::try_from(reader.read_u8()?)
+            .map_err(|_| BinaryReaderError::custom("Failed to parse path mode"))?;
 
         let unk1b = reader.read_u8()?;
         if unk1b != 0 && unk1b != 1 {
             return Err(BinaryReaderError::Custom(
                 format!("Invalid BND2 unk1B: {}", unk1b)
-            ).into());
+            ));
         }
 
         reader.assert::<u32>(0)?;
@@ -121,7 +122,7 @@ impl IO for BND2Header {
         })
     }
 
-    fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.big_endian = false;
 
         writer.write_bytes(b"BND\0")?;
@@ -132,10 +133,10 @@ impl IO for BND2Header {
 
         writer.write_i32(self.file_version)?;
 
-        writer.reserve("fileSize".to_string(), 4)?;
+        writer.reserve::<u32>("fileSize".to_string())?;
 
         writer.write_u32(self.file_count)?;
-        writer.reserve("baseDirOffset".to_string(), 4)?;
+        writer.reserve::<u32>("baseDirOffset".to_string())?;
 
         writer.write_u16(self.alignment_size)?;
         writer.write_u8(self.path_mode as u8)?;
@@ -163,7 +164,7 @@ pub struct BND2EntryHeader {
 }
 
 impl BND2EntryHeader {
-    pub fn from_reader(reader: &mut BinaryReader, path_mode: BND2FilePathMode, entry_flags: BND2EntryFlags) -> Result<Self, FerrisoulsError> {
+    pub fn from_reader(reader: &mut BinaryReader, path_mode: BND2FilePathMode, entry_flags: BND2EntryFlags) -> Result<Self, BinaryReaderError> {
         let id = reader.read_i32()?;
         let offset = reader.read_i32()?;
         let size = reader.read_i32()?;
@@ -180,7 +181,7 @@ impl BND2EntryHeader {
                     if name_offset < 0 {
                         return Err(BinaryReaderError::Custom(
                             format!("Invalid BND2 name offset: {}", name_offset)
-                        ).into());
+                        ));
                     }
 
                     reader.step_in(name_offset as u64)?;
@@ -202,17 +203,17 @@ impl BND2EntryHeader {
         })
     }
 
-    pub fn to_writer(&self, writer: &mut BinaryWriter, path_mode: BND2FilePathMode, entry_flags: BND2EntryFlags, index: usize) -> Result<(), FerrisoulsError> {
+    pub fn to_writer(&self, writer: &mut BinaryWriter, path_mode: BND2FilePathMode, entry_flags: BND2EntryFlags, index: usize) -> Result<(), BinaryWriterError> {
         writer.write_i32(self.id)?;
 
-        writer.reserve(format!("fileOffset_{}", index), 4)?;
-        writer.reserve(format!("fileSize_{}", index), 4)?;
+        writer.reserve::<u32>(format!("fileOffset_{}", index))?;
+        writer.reserve::<u32>(format!("fileSize_{}", index))?;
 
         if entry_flags.contains(BND2EntryFlags::NAME_OFFSET) {
             if path_mode == BND2FilePathMode::Nameless {
                 writer.write_i32(0)?;
             } else {
-                writer.reserve(format!("nameOffset_{}", index), 4)?;
+                writer.reserve::<u32>(format!("nameOffset_{}", index))?;
             }
         }
 
@@ -230,17 +231,17 @@ pub struct BND2Entry {
 }
 
 impl BND2Entry {
-    pub fn from_reader(reader: &mut BinaryReader, header: BND2EntryHeader) -> Result<BND2Entry, FerrisoulsError> {
+    pub fn from_reader(reader: &mut BinaryReader, header: BND2EntryHeader) -> Result<BND2Entry, BinaryReaderError> {
         if header.offset < 0 {
             return Err(BinaryReaderError::Custom(
                 format!("Invalid BND2 file offset: {}", header.offset)
-            ).into());
+            ));
         }
 
         if header.size < 0 {
             return Err(BinaryReaderError::Custom(
                 format!("Invalid BND2 file size: {}", header.size)
-            ).into());
+            ));
         }
 
         reader.step_in(header.offset as u64)?;
@@ -255,7 +256,7 @@ impl BND2Entry {
         })
     }
 
-    pub fn to_writer(&mut self, writer: &mut BinaryWriter, alignment_size: u16, index: usize) -> Result<(), FerrisoulsError> {
+    pub fn to_writer(&mut self, writer: &mut BinaryWriter, alignment_size: u16, index: usize) -> Result<(), BinaryWriterError> {
         writer.pad(alignment_size as usize)?;
 
         self.header.offset = writer.position() as i32;
@@ -297,7 +298,7 @@ pub struct BND2 {
 }
 
 impl BND2 {
-    fn read_header(reader: &mut BinaryReader) -> Result<(Self, Vec<BND2EntryHeader>), FerrisoulsError> {
+    fn read_header(reader: &mut BinaryReader) -> Result<(Self, Vec<BND2EntryHeader>), BinaryReaderError> {
         reader.big_endian = false;
 
         let magic = reader.read_bytes(4)?;
@@ -305,7 +306,7 @@ impl BND2 {
         if magic.as_slice() != b"BND\0" {
             return Err(BinaryReaderError::Custom(
                 "Invalid BND2 magic.".to_string()
-            ).into());
+            ));
         }
 
         let header_info_flags = BND2HeaderFlags::from_bits_retain(reader.read_u8()?);
@@ -322,13 +323,14 @@ impl BND2 {
         if file_count < 0 {
             return Err(BinaryReaderError::Custom(
                 format!("Invalid BND2 file count: {}", file_count)
-            ).into());
+            ));
         }
 
         let base_dir_offset = reader.read_i32()?;
         let alignment_size = reader.read_u16()?;
 
-        let path_mode = BND2FilePathMode::try_from(reader.read_u8()?)?;
+        let path_mode = BND2FilePathMode::try_from(reader.read_u8()?)
+            .map_err(|_| BinaryReaderError::Custom("Failed to get path mode".to_string()))?;
 
         let unk1b = reader.read_u8()?;
         let unk1c = reader.read_u32()?;
@@ -336,7 +338,7 @@ impl BND2 {
         if unk1c != 0 {
             return Err(BinaryReaderError::Custom(
                 format!("Invalid BND2 Unk1C: 0x{:08X}", unk1c)
-            ).into());
+            ));
         }
 
         if !entry_flags.contains(BND2EntryFlags::NAME_OFFSET) {
@@ -348,11 +350,8 @@ impl BND2 {
             {
                 if base_dir_offset < 0 {
                     return Err(BinaryReaderError::Custom(
-                        format!(
-                            "Invalid BND2 base directory offset: {}",
-                            base_dir_offset
-                        )
-                    ).into());
+                        format!("Invalid BND2 base directory offset: {}", base_dir_offset)
+                    ));
                 }
 
                 reader.step_in(base_dir_offset as u64)?;
@@ -387,7 +386,7 @@ impl BND2 {
         Ok((bnd, file_headers))
     }
 
-    fn from_reader(&self, reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+    fn from_reader(&self, reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         let (mut bnd, file_headers) = Self::read_header(reader)?;
 
         let mut entries: Vec<BND2Entry> = Vec::with_capacity(file_headers.len());
@@ -401,7 +400,7 @@ impl BND2 {
         Ok(bnd)
     }
 
-    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.big_endian = false;
 
         writer.write_bytes(b"BND\0")?;
@@ -414,11 +413,11 @@ impl BND2 {
 
         writer.write_i32(self.file_version)?;
 
-        writer.reserve("fileSize".to_string(), 4)?;
+        writer.reserve::<u32>("fileSize".to_string())?;
 
         writer.write_i32(self.entries.len() as i32)?;
 
-        writer.reserve("baseDirOffset".to_string(), 4)?;
+        writer.reserve::<u32>("baseDirOffset".to_string())?;
 
         writer.write_u16(self.alignment_size)?;
         writer.write_u8(self.path_mode as u8)?;
@@ -451,10 +450,10 @@ impl BND2 {
         Ok(())
     }
 
-    fn write_file_names(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+    fn write_file_names(&self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         if self.path_mode == BND2FilePathMode::BaseDirectory {
             writer.fill::<i32>("baseDirOffset".to_string(), writer.position() as i32)?;
-            writer.write_shift_jis(&self.base_directory)?;
+            writer.write_shift_jis(&self.base_directory, true)?;
         } else {
             writer.fill::<i32>("baseDirOffset".to_string(), 0)?;
         }
@@ -476,7 +475,7 @@ impl BND2 {
                 }
             }
 
-            writer.write_shift_jis(&name)?;
+            writer.write_shift_jis(&name, true)?;
         }
 
         Ok(())

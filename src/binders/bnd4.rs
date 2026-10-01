@@ -37,7 +37,7 @@ pub struct BND4Header {
 }
 
 impl IO for BND4Header {
-    fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         reader.assert_bytes(b"BND4")?;
 
         let unk04 = reader.read_boolean()?;
@@ -69,9 +69,7 @@ impl IO for BND4Header {
 
         let extended = reader.read_u8()?;
         if !matches!(extended, 0 | 1 | 4 | 0x80) {
-            return Err(BinaryReaderError::Custom(
-                format!("Invalid BND4 extended value: 0x{:02X}", extended)
-            ).into());
+            return Err(BinaryReaderError::Custom(format!("Invalid BND4 extended value: 0x{:02X}", extended)));
         }
 
         reader.assert(b'\0')?;
@@ -102,7 +100,7 @@ impl IO for BND4Header {
         })
     }
 
-    fn to_writer(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.big_endian = self.big_endian;
 
         writer.write_bytes(b"BND4")?;
@@ -122,7 +120,7 @@ impl IO for BND4Header {
         writer.write_bytes(&self.signature)?;
         writer.write_u64(self.entry_header_size)?;
 
-        writer.reserve("HeadersEnd".to_string(), 8)?;
+        writer.reserve::<u64>("HeadersEnd".to_string())?;
 
         writer.write_boolean(self.unicode)?;
 
@@ -132,7 +130,7 @@ impl IO for BND4Header {
 
         writer.pad(4)?;
 
-        writer.reserve("HashTableOffset".to_string(), 8)?;
+        writer.reserve::<u64>("HashTableOffset".to_string())?;
 
         debug_assert_eq!(writer.position(), 0x40);
 
@@ -181,7 +179,7 @@ pub struct BND4EntryHeader {
 }
 
 impl BND4EntryHeader {
-    pub fn from_reader(reader: &mut BinaryReader, format: BinderFlags, bit_big_endian: bool) -> Result<Self, FerrisoulsError> {
+    pub fn from_reader(reader: &mut BinaryReader, format: BinderFlags, bit_big_endian: bool) -> Result<Self, BinaryReaderError> {
         let flags = EntryFlags::from_byte(reader.read_u8()?, bit_big_endian);
 
         reader.assert_bytes(b"\0\0\0")?; //_pad1
@@ -237,22 +235,22 @@ impl BND4EntryHeader {
         })
     }
 
-    pub fn to_writer(&self, writer: &mut BinaryWriter, format: BinderFlags, bit_big_endian: bool, index: usize) -> Result<(), FerrisoulsError> {
+    pub fn to_writer(&self, writer: &mut BinaryWriter, format: BinderFlags, bit_big_endian: bool, index: usize) -> Result<(), BinaryWriterError> {
         writer.write_u8(self.flags.to_byte(bit_big_endian))?;
         writer.pad(3)?;
 
         writer.write_i32(-1)?;
 
-        writer.reserve(format!("FileCompressedSize{}", index), 8)?;
+        writer.reserve::<u64>(format!("FileCompressedSize{}", index))?;
 
         if format.has_compression() {
-            writer.reserve(format!("FileUncompressedSize{}", index), 8)?;
+            writer.reserve::<u64>(format!("FileUncompressedSize{}", index))?;
         }
 
         if format.has_long_offsets() {
-            writer.reserve(format!("FileDataOffset{}", index), 8)?;
+            writer.reserve::<u64>(format!("FileDataOffset{}", index))?;
         } else {
-            writer.reserve(format!("FileDataOffset{}", index), 4)?;
+            writer.reserve::<u32>(format!("FileDataOffset{}", index))?;
         }
 
         if format.has_ids() {
@@ -262,7 +260,7 @@ impl BND4EntryHeader {
         }
 
         if format.has_names() {
-            writer.reserve(format!("FileNameOffset{}", index), 4)?;
+            writer.reserve::<u32>(format!("FileNameOffset{}", index))?;
         }
 
         if format == BinderFlags::HAS_NAMES_1 {
@@ -287,7 +285,7 @@ pub struct BND4Entry {
 }
 
 impl BND4Entry {
-    fn to_writer(&self, writer: &mut BinaryWriter, flags: BinderFlags, index: usize) -> Result<(), FerrisoulsError> {
+    fn to_writer(&self, writer: &mut BinaryWriter, flags: BinderFlags, index: usize) -> Result<(), BinaryWriterError> {
         if !self.data.is_empty() {
             writer.pad_align(0x10)?; // whatever your BinaryWriter calls this
         }
@@ -297,7 +295,8 @@ impl BND4Entry {
 
         let stored_data = if self.header.flags.is_compressed() {
             let compset = CompressSettings::Oodle(DCXType::DCX_KRAK, OodleSettings::KRAK);
-            Compress::raw(&self.data, &compset)?
+            Compress::raw(&self.data, &compset)
+                .map_err(|e| BinaryWriterError::custom(e.to_string()))?
 
         } else {
             self.data.clone()
@@ -333,7 +332,7 @@ pub struct BND4 {
 }
 
 impl IO for BND4 {
-    fn from_reader(reader: &mut BinaryReader) -> Result<Self, FerrisoulsError> {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         let header = BND4Header::from_reader(reader)?;
 
         reader.big_endian = header.big_endian; // set by flag
@@ -345,7 +344,7 @@ impl IO for BND4 {
                 format!("Invalid BND4 entry header size: expected 0x{:X}, got 0x{:X}",
                 expected_entry_header_size,
                 header.entry_header_size
-            )).into());
+            )));
         }
 
 
@@ -399,17 +398,18 @@ impl IO for BND4 {
 
             let data = if entry_header.flags.is_compressed() {
                 // Use the compression information encoded by the flags.
-                let (data,_) = Decompress::raw(&stored_data)?;
+                let (data,_) = Decompress::raw(&stored_data)
+                    .map_err(|e| BinaryReaderError::custom(e.to_string()))?;
 
                 let expected_size = entry_header.uncompressed_size
-                    .ok_or_else(|| BinaryReaderError::Custom(
-                        "Compressed BND4 entry has no uncompressed size".into()
+                    .ok_or_else(|| BinaryReaderError::custom(
+                        "Compressed BND4 entry has no uncompressed size"
                     ))?;
 
                 if data.len() != expected_size as usize {
                     return Err(BinaryReaderError::Custom(
                         format!("Expected entry size of {}, got {}", expected_size, data.len())
-                    ).into());
+                    ));
                 }
 
                 data
@@ -426,7 +426,7 @@ impl IO for BND4 {
         })
     }
 
-    fn into_writer(&self) -> Result<BinaryWriter, FerrisoulsError> {
+    fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
         let mut writer = BinaryWriter::default();
 
         writer.big_endian = self.header.big_endian;
@@ -447,9 +447,9 @@ impl IO for BND4 {
             writer.fill::<u32>(format!("FileNameOffset{}", index), writer.position() as u32)?;
 
             if self.header.unicode {
-                writer.write_utf16(entry.name.as_deref().unwrap_or(""))?;
+                writer.write_utf16(entry.name.as_deref().unwrap_or(""), true)?;
             } else {
-                writer.write_shift_jis(entry.name.as_deref().unwrap_or(""))?;
+                writer.write_shift_jis(entry.name.as_deref().unwrap_or(""), true)?;
             }
         }
 
@@ -470,7 +470,7 @@ impl IO for BND4 {
                 })
                 .collect::<Result<_, _>>()?;
 
-            let hash_table = BinderHashTable::from_names(&names)?;
+            let mut hash_table = BinderHashTable::from_names(&names)?;
             hash_table.to_writer(&mut writer)?;
 
         } else {
