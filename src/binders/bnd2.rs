@@ -1,4 +1,4 @@
-use crate::{binary::{BinaryReader, BinaryWriter, IO}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
+use crate::{binary::{BinaryReader, BinaryWriter, IO}, binders::{Binder, BinderEntry, BinderVersion}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
 use bitflags::{bitflags, parser::to_writer};
 
 
@@ -272,6 +272,14 @@ impl BND2Entry {
 
 }
 
+impl BinderEntry for BND2Entry {
+    type Identifier = i32;
+
+    fn identity(&self) -> &Self::Identifier {
+        &self.header.id
+    }
+}
+
 /// BND2 archive.
 #[derive(Debug, Clone)]
 pub struct BND2 {
@@ -481,6 +489,16 @@ impl BND2 {
         Ok(())
     }
 
+}
+
+impl Binder for BND2 {
+    const VERSION: BinderVersion = BinderVersion::V2;
+
+    type Entry = BND2Entry;
+
+    fn entries(&mut self) -> &mut Vec<Self::Entry> {
+        &mut self.entries
+    }
 }
 
 

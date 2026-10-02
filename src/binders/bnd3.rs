@@ -1,5 +1,6 @@
 use super::{BinderFlags, EntryFlags};
 use crate::binary::{IO, BinaryReader, BinaryWriter, bytes::VariableUInt};
+use crate::binders::{Binder, BinderEntry, BinderVersion};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 
 
@@ -103,7 +104,7 @@ pub struct BND3EntryHeader {
 
     pub data_offset: VariableUInt, // u64 when LONG_OFFSETS else u32
 
-    pub entry_id: Option<i32>,
+    pub entry_id: Option<i32>, // optional; -1 when not given.
     pub name_offset: Option<u32>, // offset to shift-jis encoded entry name
     pub uncompressed_size: Option<u32>,
 }
@@ -177,7 +178,11 @@ impl BND3EntryHeader {
         }
 
         if parent.flags.has_ids() {
-            writer.write_i32(self.entry_id.unwrap())?; // shouldn't be possible to be `None` due to parent flag
+            let entry_id = self.entry_id.ok_or_else(|| {
+                BinaryWriterError::invalid_data("BND3 entry requires an entry ID.")
+            })?;
+
+            writer.write_i32(entry_id)?;
         }
 
         if parent.flags.has_names() {
@@ -189,7 +194,11 @@ impl BND3EntryHeader {
         }
 
         if parent.flags.has_compression() {
-            writer.write_u32(self.uncompressed_size.unwrap())?; // shouldn't be possible to be `None` due to parent flag
+            let offset = self.uncompressed_size.ok_or_else(|| {
+                BinaryWriterError::invalid_data("BND3 entry requires uncompressed size.")
+            })?;
+
+            writer.write_u32(offset)?;
         }
 
         Ok(())
@@ -204,6 +213,15 @@ pub struct BND3Entry {
     pub header: BND3EntryHeader,
     pub data: Vec<u8>
 }
+
+impl BinderEntry for BND3Entry {
+    type Identifier = Option<i32>;
+
+    fn identity(&self) -> &Self::Identifier {
+        &self.header.entry_id
+    }
+}
+
 
 
 #[derive(Debug, Clone)]
@@ -274,5 +292,15 @@ impl IO for BND3 {
         Ok(())
     }
 
+}
+
+impl Binder for BND3 {
+    const VERSION: BinderVersion = BinderVersion::V1;
+
+    type Entry = BND3Entry;
+
+    fn entries(&mut self) -> &mut Vec<Self::Entry> {
+        &mut self.entries
+    }
 }
 

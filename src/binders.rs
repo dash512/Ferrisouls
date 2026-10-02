@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use bitflags::bitflags;
 pub use crate::binary::bytes::VariableUInt;
 pub use crate::errors::{FerrisoulsError, BinaryReaderError, BinaryWriterError};
@@ -14,8 +16,9 @@ pub mod hash_table;
 pub enum BinderVersion {
     V1, // used in very old games such as Metal Wolf Chaos
     V2, // used in games such as MWC, Another Century's Episode 2, Armored Core: FF, AC: 9B, AC: LR. typically psp/ps2 games 
-    V3,// used generally in games pre DS2 (2014)
-    V4// all games after DS2 (2014)
+    V3, // used generally in games pre DS2 (2014)
+    V4, // all games after DS2 (2014)
+    VARIABLE //could be any of the above
 }
 
 
@@ -172,9 +175,90 @@ impl EntryFlags {
 }
 
 
+
+/// This trait allows for basic handling of entries within any Binder that implements it.
+/// 
+/// Expects a BinderVersion, and an `Entry` type corresponding to the entries/files stored in this Binder.
+/// 
+//TODO: add more required fns to allow more runtime modification to the Binder itself as well as its entries
 pub trait Binder {
-//useful shared functions and getters to implement on different binder types
+    const VERSION: BinderVersion; // BinderVersion
+    type Entry: BinderEntry; 
+
+    fn entries(&mut self) -> &mut Vec<Self::Entry>;
+
+    fn get(&mut self, index: usize) -> Option<&<Self as Binder>::Entry> {
+        self.entries().get(index)
+    }
+
+    fn add(&mut self, entry: Self::Entry) {
+        self.entries().push(entry);
+    }
+    
+    fn remove(&mut self, index: usize) {
+        self.entries().remove(index);
+    }
+    
+    fn first(&mut self) -> Option<&<Self as Binder>::Entry> {
+        self.entries().first()
+    }
+
+    fn last(&mut self) -> Option<&<Self as Binder>::Entry> {
+        self.entries().last()
+    }
+
+    fn pop_last(&mut self) -> Option<Self::Entry> {
+        self.entries().pop()
+    }
+
+    fn clear(&mut self) {
+        self.entries().clear();
+    }
+
+    fn count(&mut self) -> usize {
+        self.entries().len()
+    }
+
+    fn iter(&mut self) -> std::slice::IterMut<'_, <Self as Binder>::Entry> {
+        self.entries().iter_mut()
+    }
+
+    fn find(&mut self, id: <<Self as Binder>::Entry as BinderEntry>::Identifier) -> Option<&Self::Entry> {
+        self.entries()
+            .iter()
+            .find(
+                |&e|
+                *e.identity() == id
+            )
+    }
+
+    fn insert(&mut self, index: usize, entry: Self::Entry) -> &mut <Self as Binder>::Entry {
+        self.entries().insert_mut(index, entry)
+    }
+
+    fn is_empty(&mut self) -> bool {
+        self.entries().is_empty()
+    }
+
+    fn append(&mut self, other: &mut Vec<Self::Entry>) {
+        self.entries().append(other)
+    }
+
+    fn extend(&mut self, other: Vec<Self::Entry>) {
+        self.entries().extend(other)
+    }
+
 }
+
+/// Any objects inheriting this trait must belong to a Binder as its entries
+/// 
+/// Expects an Identifier (type of its id, e.g String) and a function `identity` that returns a reference to its id.
+/// This is so that the parent Binder can identify it and perform actions based on which entry it is.
+/// 
+//TODO: implement more stuff here
 pub trait BinderEntry {
-//useful shared functions and getters to implement on different binder types
+    type Identifier: PartialEq; //.name / .id etc
+
+    fn identity(&self) -> &Self::Identifier;
 }
+

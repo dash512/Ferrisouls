@@ -1,5 +1,6 @@
 use super::{BinderFlags, EntryFlags};
 use crate::binary::{IO, BinaryReader, BinaryWriter, bytes::VariableUInt};
+use crate::binders::{Binder, BinderEntry, BinderVersion};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 
 
@@ -170,12 +171,20 @@ impl BNDEntry {
 
 }
 
+impl BinderEntry for BNDEntry {
+    type Identifier = i32;
+
+    fn identity(&self) -> &Self::Identifier {
+        &self.header.entry_id
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub struct BND {
     header: BNDHeader,
-    entries: Vec<BNDEntry>,
     root_file_path: String,
+    entries: Vec<BNDEntry>,
 }
 
 impl BND {
@@ -297,3 +306,12 @@ impl BND {
 
 }
 
+impl Binder for BND {
+    const VERSION: BinderVersion = BinderVersion::V1;
+
+    type Entry = BNDEntry;
+
+    fn entries(&mut self) -> &mut Vec<Self::Entry> {
+        &mut self.entries
+    }
+}

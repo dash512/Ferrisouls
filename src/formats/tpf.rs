@@ -1,4 +1,4 @@
-use crate::{binary::bytes::ByteOrder, textures::dxgi::DxgiFormat};
+use crate::{binary::bytes::ByteOrder, binders::{Binder, BinderEntry, BinderVersion}, textures::dxgi::DxgiFormat};
 
 pub enum TPFPlatform {
     PC = 0,
@@ -65,6 +65,14 @@ pub struct TPFTexture {
     platform: TPFPlatform // platform stored in parent TPF, but is available for Textures for QoL - Grimrukh
 }
 
+impl BinderEntry for TPFTexture {
+    type Identifier = String;
+
+    fn identity(&self) -> &Self::Identifier {
+        &self.stem
+    }
+}
+
 impl TPFTexture {
     
 }
@@ -88,11 +96,18 @@ pub struct TPF {
     tpf_flags: u8 // non-zero value on PS3 means textures have `unk2`; unknown otherwise
 }
 
+impl Binder for TPF {
+    const VERSION: BinderVersion = BinderVersion::VARIABLE; // can be 3 or 4. TODO: is this correct?
+    type Entry = TPFTexture;
+
+    fn entries(&mut self) -> &mut Vec<Self::Entry> {
+        &mut self.textures
+    }
+}
+
 impl TPF {
     
-} 
-
-
+}
 
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 use crate::binary::IO;
+use crate::binders::{Binder, BinderEntry};
 use crate::dcx::{Compress, CompressSettings, DCXType, Decompress};
 use crate::errors::{BinaryReaderError, BinaryWriterError};
 use crate::games::Game;
@@ -170,7 +171,7 @@ pub struct BND4EntryHeader {
 
     pub data_offset: VariableUInt,
 
-    pub entry_id: Option<i32>,
+    pub entry_id: Option<i32>, // -1 when not given
     pub name_offset:  Option<u32>,
     
     // Only when format == NAMES_1.
@@ -321,6 +322,14 @@ impl BND4Entry {
         Ok(())
     }
 
+}
+
+impl BinderEntry for BND4Entry {
+    type Identifier = Option<i32>;
+
+    fn identity(&self) -> &Self::Identifier {
+        &self.header.entry_id
+    }
 }
 
 
@@ -490,3 +499,12 @@ impl IO for BND4 {
 
 }
 
+impl Binder for BND4 {
+    const VERSION: BinderVersion = BinderVersion::V1;
+
+    type Entry = BND4Entry;
+
+    fn entries(&mut self) -> &mut Vec<Self::Entry> {
+        &mut self.entries
+    }
+}
