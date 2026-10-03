@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
 use bitflags::bitflags;
+use crate::binary::IO;
 pub use crate::binary::bytes::VariableUInt;
 pub use crate::errors::{FerrisoulsError, BinaryReaderError, BinaryWriterError};
 
@@ -181,7 +182,7 @@ impl EntryFlags {
 /// Expects a BinderVersion, and an `Entry` type corresponding to the entries/files stored in this Binder.
 /// 
 //TODO: add more required fns to allow more runtime modification to the Binder itself as well as its entries
-pub trait Binder {
+pub trait Binder: IO {
     const VERSION: BinderVersion; // BinderVersion
     type Entry: BinderEntry; 
 

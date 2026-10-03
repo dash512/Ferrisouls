@@ -345,7 +345,7 @@ use super::*;
             if buffer.len() < 68 {
                 return Err(BinaryReaderError::custom("Invalid Header Size!"));
             }
-            Self::from_reader(&mut BinaryReader::from(buffer, true, false))
+            Self::from_reader(&mut BinaryReader::new(buffer, true, false))
         }
 
         fn from_path(path: &Path) -> Result<Self, BinaryReaderError> {
@@ -526,7 +526,7 @@ impl DCXType {
         file.read_exact(&mut header);
 
         Self::detect(
-            &mut BinaryReader::from(&header, true, false)
+            &mut BinaryReader::new(&header, true, false)
         )
     }
 
@@ -554,6 +554,7 @@ impl DCXType {
             return Ok(Self::Unknown);// very unlikely to be DCX at this point - Grimrukh
         }
 
+        reader.set_position(0)?;
         let header = DCXHeader::from_reader(reader)?;
         let header_vinfo = header.get_version_info();
         let dcx_type = DCXType::from_version_info(&header_vinfo);
@@ -921,12 +922,17 @@ impl Decompress {
         Ok(decompressed)
     }
 
-    ///Takes compressed raw bytes and returns decompressed bytes and DCXType
+    ///Takes compressed raw bytes and returns decompressed bytes and DCXType.
+    ///Returns unchanged with `DCXType::Null` if buffer doesn't begin with DCX magic.
     pub unsafe fn raw(raw_buffer: &[u8]) -> Result<(Vec<u8>, DCXType), FerrisoulsError> {
-        let mut reader = BinaryReader::from(raw_buffer, true, false);
+        let mut reader = BinaryReader::new(raw_buffer, true, false);
+
+        if reader.peek_bytes(4)? != *b"DCX\0" {
+            return Ok((raw_buffer.to_vec(), DCXType::Null));
+        }
 
         let dcx_type = DCXType::detect(&mut reader)?;
-        reader.set_position(0);
+        reader.set_position(0)?;
 
         match dcx_type {
             DCXType::Unknown => Err(DCXError::unsupported("Cannot decompress unknown DCX type.").into()),
@@ -1140,7 +1146,7 @@ impl Compress {
             writer.pad_align(0x10);
         }
 
-        writer.patch_u32(0x20, compressed_size as u32)?;
+        writer.write_value_at(0x20, compressed_size as u32)?;
 
         Ok(writer.into_inner())
     }

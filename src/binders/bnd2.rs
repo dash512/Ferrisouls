@@ -394,70 +394,6 @@ impl BND2 {
         Ok((bnd, file_headers))
     }
 
-    fn from_reader(&self, reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
-        let (mut bnd, file_headers) = Self::read_header(reader)?;
-
-        let mut entries: Vec<BND2Entry> = Vec::with_capacity(file_headers.len());
-
-        for header in file_headers {
-            entries.push(BND2Entry::from_reader(reader, header)?);
-        }
-
-        bnd.entries = entries;
-
-        Ok(bnd)
-    }
-
-    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
-        writer.big_endian = false;
-
-        writer.write_bytes(b"BND\0")?;
-
-        writer.write_u8(self.header_info_flags.bits())?;
-        writer.write_u8(self.entry_flags.bits())?;
-
-        writer.write_u8(self.unk06)?;
-        writer.write_u8(self.unk07)?;
-
-        writer.write_i32(self.file_version)?;
-
-        writer.reserve::<u32>("fileSize".to_string())?;
-
-        writer.write_i32(self.entries.len() as i32)?;
-
-        writer.reserve::<u32>("baseDirOffset".to_string())?;
-
-        writer.write_u16(self.alignment_size)?;
-        writer.write_u8(self.path_mode as u8)?;
-
-        writer.write_u8(self.unk1b)?;
-        writer.write_u32(0)?;
-
-        if !self.entry_flags.contains(BND2EntryFlags::NAME_OFFSET) {
-            writer.write_u32(0)?;
-        }
-
-        //entry headers
-        for (index, entry) in self.entries.iter().enumerate() {
-            entry.header.to_writer(writer, self.path_mode, self.entry_flags, index)?;
-        }
-
-        if self.entry_flags.contains(BND2EntryFlags::NAME_OFFSET) {
-            self.write_file_names(writer)?;
-        } else {
-            writer.fill::<i32>("baseDirOffset".to_string(), 0)?;
-        }
-
-        //write file data
-        for (index, entry) in self.entries.iter_mut().enumerate() {
-            entry.to_writer(writer, self.alignment_size, index)?;
-        }
-
-        writer.fill::<i32>("fileSize".to_string(), writer.position() as i32)?;
-
-        Ok(())
-    }
-
     fn write_file_names(&self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         if self.path_mode == BND2FilePathMode::BaseDirectory {
             writer.fill::<i32>("baseDirOffset".to_string(), writer.position() as i32)?;
@@ -487,6 +423,73 @@ impl BND2 {
         }
 
         Ok(())
+    }
+
+}
+
+impl IO for BND2 {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+        let (mut bnd, file_headers) = Self::read_header(reader)?;
+
+        let mut entries: Vec<BND2Entry> = Vec::with_capacity(file_headers.len());
+
+        for header in file_headers {
+            entries.push(BND2Entry::from_reader(reader, header)?);
+        }
+
+        bnd.entries = entries;
+
+        Ok(bnd)
+    }
+
+    fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
+        let mut writer = BinaryWriter::new(false, false);
+
+        writer.write_bytes(b"BND\0")?;
+
+        writer.write_u8(self.header_info_flags.bits())?;
+        writer.write_u8(self.entry_flags.bits())?;
+
+        writer.write_u8(self.unk06)?;
+        writer.write_u8(self.unk07)?;
+
+        writer.write_i32(self.file_version)?;
+
+        writer.reserve::<u32>("fileSize".to_string())?;
+
+        writer.write_i32(self.entries.len() as i32)?;
+
+        writer.reserve::<u32>("baseDirOffset".to_string())?;
+
+        writer.write_u16(self.alignment_size)?;
+        writer.write_u8(self.path_mode as u8)?;
+
+        writer.write_u8(self.unk1b)?;
+        writer.write_u32(0)?;
+
+        if !self.entry_flags.contains(BND2EntryFlags::NAME_OFFSET) {
+            writer.write_u32(0)?;
+        }
+
+        //entry headers
+        for (index, entry) in self.entries.iter().enumerate() {
+            entry.header.to_writer(&mut writer, self.path_mode, self.entry_flags, index)?;
+        }
+
+        if self.entry_flags.contains(BND2EntryFlags::NAME_OFFSET) {
+            self.write_file_names(&mut writer)?;
+        } else {
+            writer.fill::<i32>("baseDirOffset".to_string(), 0)?;
+        }
+
+        //write file data
+        for (index, entry) in self.entries.iter_mut().enumerate() {
+            entry.to_writer(&mut writer, self.alignment_size, index)?;
+        }
+
+        writer.fill::<i32>("fileSize".to_string(), writer.position() as i32)?;
+
+        Ok(writer)
     }
 
 }

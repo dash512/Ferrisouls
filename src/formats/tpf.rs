@@ -1,4 +1,4 @@
-use crate::{binary::bytes::ByteOrder, binders::{Binder, BinderEntry, BinderVersion}, textures::dxgi::DxgiFormat};
+use crate::{binary::{BinaryReader, BinaryWriter, IO, bytes::ByteOrder}, binders::{Binder, BinderEntry, BinderVersion}, errors::{BinaryReaderError, BinaryWriterError}, textures::dxgi::DxgiFormat};
 
 pub enum TPFPlatform {
     PC = 0,
@@ -94,6 +94,19 @@ pub struct TPF {
     platform: TPFPlatform, // default PC
     encoding_type: u8, // default 0
     tpf_flags: u8 // non-zero value on PS3 means textures have `unk2`; unknown otherwise
+}
+
+
+impl IO for TPF {
+    ///Unimplemented
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+        unimplemented!()
+    }
+
+    ///Unimplemented
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
+        unimplemented!()
+    }
 }
 
 impl Binder for TPF {

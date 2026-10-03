@@ -93,10 +93,12 @@ pub struct BNDEntryHeader {
     pub file_size: u32,
     pub name_offset: u32,
     pub name: String,
+
+    slot: i64 // unique header key set when written. Used for reservations. Not serialized.
 }
 
-impl BNDEntryHeader {
-    pub fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+impl IO for BNDEntryHeader {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         let entry_id = reader.read_i32()?;
         let data_offset = reader.read_u32()?;
         let file_size = reader.read_u32()?;
@@ -111,25 +113,16 @@ impl BNDEntryHeader {
             format!("File_{}", entry_id)
         };
 
-        Ok(
-            Self {
-                entry_id,
-                data_offset,
-                file_size,
-                name_offset,
-                name
-            }
-        )
+        Ok(Self { entry_id, data_offset, file_size, name_offset, name, slot: -1 })
     }
 
-    pub fn to_writer(&mut self, writer: &mut BinaryWriter, index: usize) -> Result<(), BinaryWriterError> {
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
+        self.slot = writer.position() as i64;
+
         writer.write_i32(self.entry_id)?;
-
-        writer.reserve::<u32>(format!("FileOffset{}", index))?;
-
+        writer.reserve::<u32>(format!("FileOffset{}", self.slot))?;
         writer.write_u32(self.file_size)?;
-
-        writer.reserve::<u32>(format!("FileName{}", index))?;
+        writer.reserve::<u32>(format!("FileName{}", self.slot))?;
 
         Ok(())
     }
@@ -141,34 +134,34 @@ impl BNDEntryHeader {
 #[derive(Debug, Clone)]
 pub struct BNDEntry {
     pub header: BNDEntryHeader,
-    pub data: Vec<u8>
+    pub data: Vec<u8>,
 }
 
-impl BNDEntry {
-    pub fn from_reader(reader: &mut BinaryReader, header: BNDEntryHeader) -> Result<Self, BinaryReaderError> {
+impl IO for BNDEntry {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+        let header = BNDEntryHeader::from_reader(reader)?;
+
         reader.step_in(header.data_offset as u64)?;
         let data = reader.read_bytes(header.file_size as usize)?;
         reader.step_out()?;
 
-        Ok(
-            Self {
-                header,
-                data
-            }
-        )
+        Ok(Self { header, data })
     }
 
-    pub fn to_writer(&mut self, writer: &mut BinaryWriter, index: usize) -> Result<(), BinaryWriterError> {
-        writer.fill::<u32>(format!("FileOffset{}", index), writer.position() as u32)?;
+    // Writes only the file data and fills the offset reserved by header.to_writer().
+    fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
+        let mut writer = BinaryWriter::new(false, false); // TODO: is this right?
+        
+        let pos = writer.position() as u32;
+        writer.fill::<u32>(format!("FileOffset{}", self.header.slot), pos)?;
 
-        self.header.data_offset = writer.position() as u32;
+        self.header.data_offset = pos;
         self.header.file_size = self.data.len() as u32;
 
         writer.write_bytes(&self.data)?;
 
-        Ok(())
+        Ok(writer)
     }
-
 }
 
 impl BinderEntry for BNDEntry {
@@ -188,118 +181,85 @@ pub struct BND {
 }
 
 impl BND {
-    fn read_header(reader: &mut BinaryReader) -> Result<(BNDHeader, String, Vec<BNDEntryHeader>), BinaryReaderError> {
+    fn read_header(reader: &mut BinaryReader) -> Result<(BNDHeader, String), BinaryReaderError> {
         let header = BNDHeader::from_reader(reader)?;
 
-        let root_file_path =
-            if header.root_path_offset != 0 {
-                if header.root_path_offset < 0 {
-                    return Err(BinaryReaderError::Custom(
-                            format!("Invalid BND root path offset: {}", header.root_path_offset)
-                        )
-                    );
-                }
-
-                reader.step_in(header.root_path_offset as u64)?;
-                let root_file_path = reader.read_ascii()?;
-                reader.step_out()?;
-
-                root_file_path
-            } else {
-                String::new()
-            };
-
-        let mut entry_headers =
-            Vec::with_capacity(header.entry_count as usize);
-
-        for _ in 0..header.entry_count {
-            entry_headers.push(BNDEntryHeader::from_reader(reader)?);
-        }
-
-        Ok(
-            (
-                header,
-                root_file_path,
-                entry_headers
-            )
-        )
-    }
-
-    fn from_reader(&self, reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
-        let (header, root_file_path, entry_headers) =
-            Self::read_header(reader)?;
-
-        let mut entries =
-            Vec::with_capacity(entry_headers.len());
-
-        for entry_header in entry_headers {
-            entries.push(BNDEntry::from_reader(reader, entry_header)?
-            );
-        }
-
-        Ok(
-            Self {
-                header,
-                entries,
-                root_file_path
+        let root_file_path = if header.root_path_offset != 0 {
+            if header.root_path_offset < 0 {
+                return Err(BinaryReaderError::Custom(
+                    format!("Invalid BND root path offset: {}", header.root_path_offset)
+                ));
             }
-        )
+            reader.step_in(header.root_path_offset as u64)?;
+            let path = reader.read_ascii()?;
+            reader.step_out()?;
+            path
+        } else {
+            String::new()
+        };
+
+        Ok((header, root_file_path))
+    }
+}
+
+impl IO for BND {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+        let (header, root_file_path) = Self::read_header(reader)?;
+
+        let mut entries = Vec::with_capacity(header.entry_count as usize);
+        for _ in 0..header.entry_count {
+            entries.push(BNDEntry::from_reader(reader)?);
+        }
+
+        Ok(Self { header, entries, root_file_path })
     }
 
     fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.write_bytes(b"BND\0")?;
-
-        writer.write_u16(0xFFFFu16);
-        writer.write_u16(0u16);
-
+        writer.write_u16(0xFFFFu16)?;
+        writer.write_u16(0u16)?;
         writer.write_i32(self.header.version)?;
-
         writer.reserve::<u32>("FileSize".to_string())?;
-
         writer.write_i32(self.entries.len() as i32)?;
-
-        writer.reserve::<u32>("RootFilePath".to_string())?;
-
+        writer.reserve::<u32>("RootPath".to_string())?;
         writer.write_u16(self.header.format0)?;
         writer.write_u16(self.header.format1)?;
-
         writer.write_u32(0)?;
 
-        //file headers
-        for (index, entry) in self.entries.iter_mut().enumerate() {
-            entry.header.to_writer(writer, index)?;
+        //entry headers
+        for entry in self.entries.iter_mut() {
+            entry.header.to_writer(writer)?;
         }
 
-
-        if self.root_file_path != "" {
-            writer.fill::<i32>("RootFilePath".to_string(), writer.position() as i32)?;
-
+        //root path
+        if !self.root_file_path.is_empty() {
+            let pos = writer.position() as u32;
+            writer.fill::<u32>("RootPath".to_string(), pos)?;
             writer.write_shift_jis(&self.root_file_path, true)?;
+        } else {
+            writer.fill::<u32>("RootPath".to_string(), 0)?;
         }
-        else {
-            writer.fill::<i32>("RootFilePath".to_string(), 0)?;
-        }
 
-
-        for (index, entry) in self.entries.iter().enumerate() {
-            writer.fill::<i32>(format!("FileName{}", index), writer.position() as i32)?;
-
+        //entry names
+        for entry in self.entries.iter() {
+            let pos = writer.position() as u32;
+            writer.fill::<u32>(format!("FileOffset{}", entry.header.slot), pos)?;
             writer.write_shift_jis(&entry.header.name, true)?;
         }
 
         writer.pad(0x10)?;
 
-        //Files
-        let entry_count = self.entries.len();
+        //entry data
+        let last = self.entries.len().saturating_sub(1);
         for (index, entry) in self.entries.iter_mut().enumerate() {
-            entry.to_writer(writer, index)?;
-
-            if index != entry_count - 1 {
+            entry.to_writer(writer)?;
+            if index != last {
                 writer.pad(0x10)?;
             }
         }
 
-        writer.fill::<i32>("FileSize".to_string(), writer.position() as i32)?;
+        let end = writer.position() as u32;
+        writer.fill::<u32>("FileSize".to_string(), end)?;
 
         Ok(())
     }

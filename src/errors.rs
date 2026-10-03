@@ -9,6 +9,9 @@ use thiserror::Error;
 /// throughout their code.
 #[derive(Debug, Error)]
 pub enum FerrisoulsError {
+    #[error("Ferrisouls Error: {0}")]
+    Custom(String),
+
     #[error(transparent)]
     DCX(#[from] DCXError),
 
@@ -26,6 +29,12 @@ pub enum FerrisoulsError {
 
     #[error(transparent)]
     BinaryWriter(#[from] BinaryWriterError),
+}
+
+impl FerrisoulsError {
+    pub fn custom(msg: impl Into<String>) -> Self {
+        Self::Custom(msg.into())
+    }
 }
 
 

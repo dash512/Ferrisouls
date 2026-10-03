@@ -286,9 +286,57 @@ pub struct BND4Entry {
 }
 
 impl BND4Entry {
-    fn to_writer(&self, writer: &mut BinaryWriter, flags: BinderFlags, index: usize) -> Result<(), BinaryWriterError> {
+    pub fn from_reader(reader: &mut BinaryReader, flags: BinderFlags, bit_big_endian: bool, unicode: bool) -> Result<Self, BinaryReaderError> {
+        let header = BND4EntryHeader::from_reader(reader, flags, bit_big_endian)?;
+
+        // Names are referenced by absolute offsets from the start of the BND4.
+        let name = match header.name_offset {
+            Some(offset) => {
+                reader.step_in(offset as u64)?;
+                let name = if unicode {
+                    reader.read_utf16()?
+                } else {
+                    reader.read_shift_jis()?
+                };
+                reader.step_out()?;
+                Some(name)
+            }
+            None => None,
+        };
+
+        reader.step_in(header.data_offset.as_u64())?;
+        let stored_data = reader.read_bytes(header.compressed_size as usize)?;
+        reader.step_out()?;
+
+        eprintln!("entry {:?}: flags={:?} compressed={} first4={:02X?}",
+    name, header.flags, header.flags.is_compressed(), &stored_data[..stored_data.len().min(4)]);
+
+        let data = if header.flags.is_compressed() {
+            let (data, _) = unsafe { Decompress::raw(&stored_data) }
+                .map_err(|e| BinaryReaderError::custom(e.to_string()))?;
+
+            let expected_size = header.uncompressed_size
+                .ok_or_else(|| BinaryReaderError::custom(
+                    "Compressed BND4 entry has no uncompressed size"
+                ))?;
+
+            if data.len() != expected_size as usize {
+                return Err(BinaryReaderError::Custom(
+                    format!("Expected entry size of {}, got {}", expected_size, data.len())
+                ));
+            }
+
+            data
+        } else {
+            stored_data
+        };
+
+        Ok(Self { name, header, data })
+    }
+
+    pub fn to_writer(&self, writer: &mut BinaryWriter, flags: BinderFlags, index: usize) -> Result<(), BinaryWriterError> {
         if !self.data.is_empty() {
-            writer.pad_align(0x10)?; // whatever your BinaryWriter calls this
+            writer.pad_align(0x10)?;
         }
 
         let data_offset = writer.position();
@@ -356,89 +404,29 @@ impl IO for BND4 {
             )));
         }
 
-
-        let mut entry_headers = Vec::with_capacity(header.entry_count as usize);
+        let mut entries = Vec::with_capacity(header.entry_count as usize);
 
         for _ in 0..header.entry_count {
-            entry_headers.push(BND4EntryHeader::from_reader(reader, header.flags, header.bit_big_endian)?);
-        }
-
-    
-        //names are stored after all entry headers and are referenced by absolute offsets from the beginning of the BND4.
-        let mut names = Vec::with_capacity(entry_headers.len());
-
-        for entry_header in &entry_headers {
-            let name = match entry_header.name_offset {
-                Some(offset) => {
-                    reader.step_in(offset as u64)?;
-
-                    let name = if header.unicode {
-                        reader.read_utf16()?
-                    } else {
-                        reader.read_shift_jis()?
-                    };
-
-                    reader.step_out()?;
-                    Some(name)
-                }
-                None => None,
-            };
-
-            names.push(name);
+            entries.push(BND4Entry::from_reader(reader, header.flags, header.bit_big_endian, header.unicode)?);
         }
 
         if header.extended == 4 {
             reader.step_in(header.hash_table_offset)?;
             BinderHashTable::from_reader(reader)?; // not stored, just read to assert that it's correct
             reader.step_out()?;
+        } else {
+            reader.assert::<i64>(0)?;
         }
 
-
-        //write entries
-        let mut entries = Vec::with_capacity(entry_headers.len());
-
-        for (index, entry_header) in entry_headers.into_iter().enumerate() {
-            let name = names[index].clone();
-
-            reader.step_in(entry_header.data_offset.as_u64())?;
-            let compressed_size = entry_header.compressed_size as usize;
-            let stored_data = reader.read_bytes(compressed_size)?;
-            reader.step_out()?;
-
-            let data = if entry_header.flags.is_compressed() {
-                // Use the compression information encoded by the flags.
-                let (data,_) = unsafe { Decompress::raw(&stored_data) }
-                    .map_err(|e| BinaryReaderError::custom(e.to_string()))?;
-
-                let expected_size = entry_header.uncompressed_size
-                    .ok_or_else(|| BinaryReaderError::custom(
-                        "Compressed BND4 entry has no uncompressed size"
-                    ))?;
-
-                if data.len() != expected_size as usize {
-                    return Err(BinaryReaderError::Custom(
-                        format!("Expected entry size of {}, got {}", expected_size, data.len())
-                    ));
-                }
-
-                data
-            } else {
-                stored_data
-            };
-            
-            entries.push(BND4Entry {name, header: entry_header, data});
-        }
-
-        Ok(Self {
-            header,
-            entries,
-        })
-    }
+        Ok(Self { header, entries })
+    }  
 
     fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
         let mut writer = BinaryWriter::default();
 
         writer.big_endian = self.header.big_endian;
+
+        self.header.entry_count = self.entries.len() as u32; // modifying entries at all may make this incosnistent
 
         self.header.to_writer(&mut writer)?;
 
@@ -448,23 +436,21 @@ impl IO for BND4 {
         }
 
         // Entry names
-        for (index, entry) in self.entries.iter().enumerate() {
-            if !self.header.flags.has_names() {
-                continue;
-            }
+        if self.header.flags.has_names() {
+            for (index, entry) in self.entries.iter().enumerate() {
+                writer.fill::<u32>(format!("FileNameOffset{}", index), writer.position() as u32)?;
 
-            writer.fill::<u32>(format!("FileNameOffset{}", index), writer.position() as u32)?;
-
-            if self.header.unicode {
-                writer.write_utf16(entry.name.as_deref().unwrap_or(""), true)?;
-            } else {
-                writer.write_shift_jis(entry.name.as_deref().unwrap_or(""), true)?;
+                if self.header.unicode {
+                    writer.write_utf16(entry.name.as_deref().unwrap_or(""), true)?;
+                } else {
+                    writer.write_shift_jis(entry.name.as_deref().unwrap_or(""), true)?;
+                }
             }
         }
 
         // Hash table
         if self.header.extended == 4 {
-            writer.pad(8)?; //align to 8 bytes
+            writer.pad_align(8)?; //align to 8 bytes
             writer.fill::<u64>("HashTableOffset".to_string(), writer.position())?;
 
             let names: Vec<String> = self.entries

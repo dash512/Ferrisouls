@@ -1,13 +1,67 @@
 /// Logic adapted from SoulsFormatsNext and Constrata
 
-use std::io::{self, Cursor, Read, Seek, SeekFrom};
+use std::fmt::Debug;
+use std::io::Cursor;
 
-use byteorder::{BigEndian, ByteOrder, LittleEndian};
 use encoding_rs::SHIFT_JIS;
 
-use crate::errors::{BinaryReaderError, FerrisoulsError};
+use crate::errors::BinaryReaderError;
 
 pub type Result<T> = std::result::Result<T, BinaryReaderError>;
+
+#[inline]
+fn invalid(msg: impl Into<String>) -> BinaryReaderError {
+    BinaryReaderError::InvalidData(msg.into())
+}
+
+fn assertion_failed(found: &dyn Debug, expected: &dyn Debug, loc: u64) -> BinaryReaderError {
+    BinaryReaderError::Custom(format!(
+        "Asserted value was incorrect! Got: `{found:?}` | Expected: `{expected:?}` | At: {loc:?}"
+    ))
+}
+
+/// Truncates at the first NUL byte (for fixed-width string fields).
+fn trim_nul(bytes: &[u8]) -> &[u8] {
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    &bytes[..end]
+}
+
+//region Readable
+
+pub trait Readable: Sized {
+    fn read_from(reader: &mut BinaryReader<'_>) -> Result<Self>;
+}
+
+macro_rules! impl_readable {
+    ($($ty:ty => $method:ident),* $(,)?) => {
+        $(
+            impl Readable for $ty {
+                #[inline]
+                fn read_from(reader: &mut BinaryReader<'_>) -> Result<Self> {
+                    reader.$method()
+                }
+            }
+        )*
+    };
+}
+
+impl_readable! {
+    u8   => read_u8,
+    i8   => read_i8,
+    u16  => read_u16,
+    i16  => read_i16,
+    u32  => read_u32,
+    i32  => read_i32,
+    u64  => read_u64,
+    i64  => read_i64,
+    u128 => read_u128,
+    i128 => read_i128,
+    f32  => read_f32,
+    f64  => read_f64,
+    bool => read_boolean,
+}
+
+//region BinaryReader
 
 #[derive(Debug)]
 pub struct BinaryReader<'a> {
@@ -18,16 +72,40 @@ pub struct BinaryReader<'a> {
     steps: Vec<u64>,
 }
 
+/// Generates the endian-aware readers for the plain integer types.
+macro_rules! int_readers {
+    ($($name:ident: $ty:ty),* $(,)?) => {
+        $(
+            #[inline]
+            pub fn $name(&mut self) -> Result<$ty> {
+                const N: usize = std::mem::size_of::<$ty>();
+                let bytes = self.read_array::<N>()?;
+
+                Ok(if self.big_endian {
+                    <$ty>::from_be_bytes(bytes)
+                } else {
+                    <$ty>::from_le_bytes(bytes)
+                })
+            }
+        )*
+    };
+}
+
 impl<'a> BinaryReader<'a> {
     //region Creation
 
-    pub fn from(data: &'a [u8], big_endian: bool, varint_long: bool) -> Self {
+    pub fn new(data: &'a [u8], big_endian: bool, varint_long: bool) -> Self {
         Self {
             data: Cursor::new(data),
             big_endian,
             varint_long,
             steps: Vec::new(),
         }
+    }
+
+    #[deprecated(note = "use `BinaryReader::new`")]
+    pub fn from(data: &'a [u8], big_endian: bool, varint_long: bool) -> Self {
+        Self::new(data, big_endian, varint_long)
     }
 
     //region Position
@@ -52,11 +130,6 @@ impl<'a> BinaryReader<'a> {
         self.position() >= self.length()
     }
 
-    #[inline]
-    pub fn is_eof(&self) -> bool {
-        self.is_at_end()
-    }
-
     pub fn set_position(&mut self, position: u64) -> Result<()> {
         if position > self.length() {
             return Err(BinaryReaderError::OutOfBounds {
@@ -66,111 +139,34 @@ impl<'a> BinaryReader<'a> {
             });
         }
 
-        self.data
-            .seek(SeekFrom::Start(position))
-            .map_err(|source| BinaryReaderError::Io {
-                position: self.position(),
-                source,
-            })?;
-
+        self.data.set_position(position);
         Ok(())
     }
 
     pub fn skip(&mut self, count: u64) -> Result<()> {
-        let position = self.position();
+        let position = self
+            .position()
+            .checked_add(count)
+            .ok_or_else(|| invalid("Reader position overflow"))?;
 
-        let new_position = position.checked_add(count).ok_or_else(|| {
-            BinaryReaderError::InvalidData(
-                "Reader position overflow".into(),
-            )
-        })?;
-
-        self.set_position(new_position)
+        self.set_position(position)
     }
 
-    //region Generic types
+    /// Runs `f` with the reader positioned at `offset`, then restores the
+    /// previous position (even if `f` fails).
+    pub fn with_position<R>(
+        &mut self,
+        offset: u64,
+        f: impl FnOnce(&mut Self) -> Result<R>,
+    ) -> Result<R> {
+        let old_position = self.position();
 
-    pub fn read<T: Readable>(&mut self) -> Result<T> {
-        T::read_from(self)
-    }
+        self.set_position(offset)?;
+        let result = f(self);
 
-    pub fn assert<T>(&mut self, value: T) -> Result<T>
-    where T: Readable + PartialEq + std::fmt::Debug {
-        let lhs = T::read_from(self)?;
-
-        if lhs != value {
-            return Err(BinaryReaderError::Custom(
-                format!("Asserted `{:?}` was incorrect!", value),
-            ));
-        }
-
-        Ok(lhs)
-    }
-
-
-    pub fn read_vec<T: Readable>(&mut self, count: usize) -> Result<Vec<T>> {
-        (0..count)
-            .map(|_| self.read())
-            .collect()
-    }
-
-    //region Input
-
-    pub fn read_bytes(&mut self, count: usize) -> Result<Vec<u8>> {
-        let position = self.position();
-
-        if self.remaining() < count as u64 {
-            return Err(BinaryReaderError::UnexpectedEof {
-                position,
-                requested: count,
-                remaining: self.remaining() as usize,
-            });
-        }
-
-        let mut bytes = vec![0u8; count];
-
-        self.data
-            .read_exact(&mut bytes)
-            .map_err(|source| BinaryReaderError::Io {
-                position,
-                source,
-            })?;
-
-        Ok(bytes)
-    }
-
-    pub fn read_bytes_into(&mut self, bytes: &mut [u8]) -> Result<()> {
-        let position = self.position();
-
-        if self.remaining() < bytes.len() as u64 {
-            return Err(BinaryReaderError::UnexpectedEof {
-                position,
-                requested: bytes.len(),
-                remaining: self.remaining() as usize,
-            });
-        }
-
-        self.data
-            .read_exact(bytes)
-            .map_err(|source| BinaryReaderError::Io {
-                position,
-                source,
-            })?;
-
-        Ok(())
-    }
-
-    pub fn assert_bytes(&mut self, value: &[u8]) -> Result<Vec<u8>> {
-        let lhs = Self::read_bytes(self, value.len())?;
-
-        if lhs != value {
-            return Err(
-                BinaryReaderError::Custom(
-                        format!("Asserted magic `{:?}` was incorrect!", value)
-                    )
-                );
-        }
-        Ok(lhs)
+        // The data is immutable, so the old position is always still valid.
+        self.data.set_position(old_position);
+        result
     }
 
     //region Stepping
@@ -185,24 +181,26 @@ impl<'a> BinaryReader<'a> {
     }
 
     pub fn step_out(&mut self) -> Result<()> {
-        let position = self.steps.pop().ok_or_else(|| {
-            BinaryReaderError::InvalidData(
-                "Reader is already stepped all the way out.".into(),
-            )
-        })?;
+        let position = self
+            .steps
+            .pop()
+            .ok_or_else(|| invalid("Reader is already stepped all the way out."))?;
 
         self.set_position(position)
     }
 
-
     //region Alignment
 
     pub fn align(&mut self, alignment: u64) -> Result<()> {
+        self.align_relative(0, alignment)
+    }
+
+    pub fn align_relative(&mut self, start: u64, alignment: u64) -> Result<()> {
         if alignment == 0 {
             return Ok(());
         }
 
-        let remainder = self.position() % alignment;
+        let remainder = self.position().saturating_sub(start) % alignment;
 
         if remainder != 0 {
             self.skip(alignment - remainder)?;
@@ -211,30 +209,149 @@ impl<'a> BinaryReader<'a> {
         Ok(())
     }
 
-    pub fn align_relative(
-        &mut self,
-        start: u64,
-        alignment: u64,
-    ) -> Result<()> {
-        if alignment == 0 {
-            return Ok(());
-        }
+    //region Raw input
 
-        let relative = self.position().saturating_sub(start);
-        let remainder = relative % alignment;
+    /// Borrows the next `count` bytes straight from the underlying data (no copy).
+    pub fn read_slice(&mut self, count: usize) -> Result<&'a [u8]> {
+        let position = self.position();
+        let data: &'a [u8] = *self.data.get_ref();
+        let start = position as usize;
 
-        if remainder != 0 {
-            self.skip(alignment - remainder)?;
-        }
+        let slice = start
+            .checked_add(count)
+            .and_then(|end| data.get(start..end))
+            .ok_or(BinaryReaderError::UnexpectedEof {
+                position,
+                requested: count,
+                remaining: self.remaining() as usize,
+            })?;
 
+        self.data.set_position(position + count as u64);
+        Ok(slice)
+    }
+
+    pub fn read_array<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let mut array = [0u8; N];
+        array.copy_from_slice(self.read_slice(N)?);
+        Ok(array)
+    }
+
+    pub fn read_bytes(&mut self, count: usize) -> Result<Vec<u8>> {
+        self.read_slice(count).map(<[u8]>::to_vec)
+    }
+
+    pub fn read_bytes_into(&mut self, bytes: &mut [u8]) -> Result<()> {
+        bytes.copy_from_slice(self.read_slice(bytes.len())?);
         Ok(())
     }
 
-    //region Integers
+    /// Reads bytes up to (and consuming) the next NUL, returning them without it.
+    fn read_cstring_slice(&mut self) -> Result<&'a [u8]> {
+        let start = self.position();
+        let data: &'a [u8] = *self.data.get_ref();
+        let rest = data.get(start as usize..).unwrap_or(&[]);
+
+        let len = rest
+            .iter()
+            .position(|&b| b == 0)
+            .ok_or(BinaryReaderError::UnexpectedEof {
+                position: start,
+                requested: 1,
+                remaining: 0,
+            })?;
+
+        self.data.set_position(start + len as u64 + 1);
+        Ok(&rest[..len])
+    }
+
+    /// Reads a fixed-width field and truncates it at the first NUL.
+    fn read_fixed_slice(&mut self, length: usize) -> Result<&'a [u8]> {
+        self.read_slice(length).map(trim_nul)
+    }
+
+    //region Generic reading
+
+    #[inline]
+    pub fn read<T: Readable>(&mut self) -> Result<T> {
+        T::read_from(self)
+    }
+
+    pub fn read_vec<T: Readable>(&mut self, count: usize) -> Result<Vec<T>> {
+        (0..count).map(|_| self.read()).collect()
+    }
+
+    /// Reads a `T` without advancing the position.
+    pub fn peek<T: Readable>(&mut self) -> Result<T> {
+        let position = self.position();
+        self.with_position(position, |r| r.read())
+    }
+
+    /// Reads a `T` at `offset`, then returns to the current position.
+    pub fn read_value_at<T: Readable>(&mut self, offset: u64) -> Result<T> {
+        self.with_position(offset, |r| r.read())
+    }
+
+    pub fn peek_bytes(&mut self, count: usize) -> Result<Vec<u8>> {
+        let position = self.position();
+        self.with_position(position, |r| r.read_bytes(count))
+    }
+
+    pub fn read_at(&mut self, offset: u64, length: usize) -> Result<Vec<u8>> {
+        self.with_position(offset, |r| r.read_bytes(length))
+    }
+
+    //region Assertions
+
+    /// Reads a `T` and errors unless it equals `expected`.
+    pub fn assert<T>(&mut self, expected: T) -> Result<T>
+    where
+        T: Readable + PartialEq + Debug,
+    {
+        let found = self.read::<T>()?;
+
+        if found != expected {
+            return Err(assertion_failed(&found, &expected, self.position()));
+        }
+
+        Ok(found)
+    }
+
+    pub fn assert_varint(&mut self, expected: i64) -> Result<i64> {
+        let found = self.read_varint()?;
+
+        if found != expected {
+            return Err(assertion_failed(&found, &expected, self.position()));
+        }
+
+        Ok(found)
+    }
+
+    pub fn assert_bytes(&mut self, expected: &[u8]) -> Result<Vec<u8>> {
+        let found = self.read_slice(expected.len())?;
+
+        if found != expected {
+            return Err(assertion_failed(&found, &expected, self.position()));
+        }
+
+        Ok(found.to_vec())
+    }
+
+    //region Integers & floats
+
+    int_readers! {
+        read_u16: u16,
+        read_i16: i16,
+        read_u32: u32,
+        read_i32: i32,
+        read_u64: u64,
+        read_i64: i64,
+        read_u128: u128,
+        read_i128: i128,
+    }
 
     #[inline]
     pub fn read_u8(&mut self) -> Result<u8> {
-        self.read_bytes(1).map(|bytes| bytes[0])
+        Ok(self.read_slice(1)?[0])
     }
 
     #[inline]
@@ -243,115 +360,21 @@ impl<'a> BinaryReader<'a> {
     }
 
     #[inline]
-    pub fn read_u16(&mut self) -> Result<u16> {
-        let bytes = self.read_bytes(2)?;
-
-        Ok(if self.big_endian {
-            BigEndian::read_u16(&bytes)
-        } else {
-            LittleEndian::read_u16(&bytes)
-        })
-    }
-
-    #[inline]
-    pub fn read_i16(&mut self) -> Result<i16> {
-        let bytes = self.read_bytes(2)?;
-
-        Ok(if self.big_endian {
-            BigEndian::read_i16(&bytes)
-        } else {
-            LittleEndian::read_i16(&bytes)
-        })
-    }
-
-    #[inline]
     pub fn read_u24(&mut self) -> Result<u32> {
-        let bytes = self.read_bytes(3)?;
+        let mut bytes = self.read_array::<3>()?;
 
-        Ok(if self.big_endian {
-            BigEndian::read_u24(&bytes)
-        } else {
-            LittleEndian::read_u24(&bytes)
-        })
+        if self.big_endian {
+            bytes.reverse();
+        }
+
+        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], 0]))
     }
 
     #[inline]
     pub fn read_i24(&mut self) -> Result<i32> {
-        let value = self.read_u24()?;
-
-        Ok(if value & 0x80_0000 != 0 {
-            (value | 0xFF00_0000) as i32
-        } else {
-            value as i32
-        })
+        // Shift into the top 24 bits, then arithmetic-shift back to sign extend.
+        Ok(((self.read_u24()? << 8) as i32) >> 8)
     }
-
-    #[inline]
-    pub fn read_u32(&mut self) -> Result<u32> {
-        let bytes = self.read_bytes(4)?;
-
-        Ok(if self.big_endian {
-            BigEndian::read_u32(&bytes)
-        } else {
-            LittleEndian::read_u32(&bytes)
-        })
-    }
-
-    #[inline]
-    pub fn read_i32(&mut self) -> Result<i32> {
-        let bytes = self.read_bytes(4)?;
-
-        Ok(if self.big_endian {
-            BigEndian::read_i32(&bytes)
-        } else {
-            LittleEndian::read_i32(&bytes)
-        })
-    }
-
-    #[inline]
-    pub fn read_u64(&mut self) -> Result<u64> {
-        let bytes = self.read_bytes(8)?;
-
-        Ok(if self.big_endian {
-            BigEndian::read_u64(&bytes)
-        } else {
-            LittleEndian::read_u64(&bytes)
-        })
-    }
-
-    #[inline]
-    pub fn read_i64(&mut self) -> Result<i64> {
-        let bytes = self.read_bytes(8)?;
-
-        Ok(if self.big_endian {
-            BigEndian::read_i64(&bytes)
-        } else {
-            LittleEndian::read_i64(&bytes)
-        })
-    }
-
-    #[inline]
-    pub fn read_u128(&mut self) -> Result<u128> {
-        let bytes = self.read_bytes(16)?;
-        let bytes: [u8; 16] = bytes.try_into().map_err(|_| {
-            BinaryReaderError::InvalidData(
-                "Invalid u128 byte count".into(),
-            )
-        })?;
-
-        Ok(if self.big_endian {
-            u128::from_be_bytes(bytes)
-        } else {
-            u128::from_le_bytes(bytes)
-        })
-    }
-
-    #[inline]
-    pub fn read_i128(&mut self) -> Result<i128> {
-        Ok(self.read_u128()? as i128)
-    }
-
-    //region Floats
 
     #[inline]
     pub fn read_f32(&mut self) -> Result<f32> {
@@ -363,37 +386,24 @@ impl<'a> BinaryReader<'a> {
         Ok(f64::from_bits(self.read_u64()?))
     }
 
-    //region Bool
-
     pub fn read_boolean(&mut self) -> Result<bool> {
         match self.read_u8()? {
             0 => Ok(false),
             1 => Ok(true),
-            value => Err(BinaryReaderError::InvalidData(format!(
-                "Invalid boolean: 0x{value:02X}"
-            ))),
+            value => Err(invalid(format!("Invalid boolean: 0x{value:02X}"))),
         }
     }
 
-    //region Fixed-width / Varint
+    //region Varints (width depends on `varint_long`)
 
     pub fn read_varint(&mut self) -> Result<i64> {
         if self.varint_long {
-            self.read_i64()
+            self.read()
         } else {
-            Ok(self.read_i32()? as i64)
+            Ok(self.read::<i32>()? as i64)
         }
     }
 
-    pub fn assert_varint(&mut self, value: i64) -> Result<i64> {
-        let read = self.read_varint()?;
-        if read != value {
-            return Err(BinaryReaderError::InvalidData(
-                format!("Expected {}, found {}", value, read)
-            ))
-        }
-        Ok(read)
-    }
     //region LEB128 / 7-bit ints
 
     pub fn read_leb128_u64(&mut self) -> Result<u64> {
@@ -402,20 +412,14 @@ impl<'a> BinaryReader<'a> {
 
         loop {
             let byte = self.read_u8()?;
+            let payload = (byte & 0x7F) as u64;
 
-            if shift >= 64 && (byte & 0x7F) != 0 {
-                return Err(BinaryReaderError::InvalidData(
-                    "Unsigned LEB128 value overflows u64".into(),
-                ));
+            // The 10th byte (shift 63) only has room for a single bit.
+            if shift == 63 && payload > 1 {
+                return Err(invalid("Unsigned LEB128 value overflows u64"));
             }
 
-            value |= ((byte & 0x7F) as u64)
-                .checked_shl(shift)
-                .ok_or_else(|| {
-                    BinaryReaderError::InvalidData(
-                        "Unsigned LEB128 shift overflow".into(),
-                    )
-                })?;
+            value |= payload << shift;
 
             if byte & 0x80 == 0 {
                 return Ok(value);
@@ -424,9 +428,7 @@ impl<'a> BinaryReader<'a> {
             shift += 7;
 
             if shift >= 64 {
-                return Err(BinaryReaderError::InvalidData(
-                    "Unsigned LEB128 value is too long".into(),
-                ));
+                return Err(invalid("Unsigned LEB128 value is too long"));
             }
         }
     }
@@ -437,205 +439,114 @@ impl<'a> BinaryReader<'a> {
 
         loop {
             let byte = self.read_u8()?;
-            let payload = (byte & 0x7F) as i64;
 
-            if shift >= 64 {
-                return Err(BinaryReaderError::InvalidData(
-                    "Signed LEB128 value is too long".into(),
-                ));
-            }
+            value |= ((byte & 0x7F) as i64) << shift;
+            shift += 7;
 
-            value |= payload.checked_shl(shift).ok_or_else(|| {
-                BinaryReaderError::InvalidData(
-                    "Signed LEB128 shift overflow".into(),
-                )
-            })?;
-
-            let continuation = byte & 0x80 != 0;
-
-            if !continuation {
+            if byte & 0x80 == 0 {
                 // Sign extend when the final payload byte has bit 6 set.
-                if shift < 63 && byte & 0x40 != 0 {
-                    value |= (!0i64) << (shift + 7);
+                if shift < 64 && byte & 0x40 != 0 {
+                    value |= -1i64 << shift;
                 }
 
                 return Ok(value);
             }
 
-            shift += 7;
-
             if shift >= 64 {
-                return Err(BinaryReaderError::InvalidData(
-                    "Signed LEB128 value is too long".into(),
-                ));
+                return Err(invalid("Signed LEB128 value is too long"));
             }
         }
     }
 
+    /// .NET-style 7-bit encoded int; byte-for-byte identical to unsigned LEB128.
+    #[inline]
     pub fn read_7bit_u64(&mut self) -> Result<u64> {
-        let mut value = 0u64;
-        let mut shift = 0u32;
+        self.read_leb128_u64()
+    }
 
-        loop {
-            let byte = self.read_u8()?;
+    //region Strings: decoding helpers
 
-            if shift >= 64 {
-                return Err(BinaryReaderError::InvalidData(
-                    "7-bit encoded value is too long".into(),
-                ));
-            }
+    fn decode_utf8(bytes: &[u8]) -> Result<String> {
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|_| invalid("Invalid UTF-8 string"))
+    }
 
-            value |= ((byte & 0x7F) as u64)
-                .checked_shl(shift)
-                .ok_or_else(|| {
-                    BinaryReaderError::InvalidData(
-                        "7-bit value shift overflow".into(),
-                    )
-                })?;
-
-            if byte & 0x80 == 0 {
-                return Ok(value);
-            }
-
-            shift += 7;
+    fn decode_ascii(bytes: &[u8]) -> Result<String> {
+        if !bytes.is_ascii() {
+            return Err(invalid("String contains non-ASCII bytes"));
         }
+
+        Self::decode_utf8(bytes)
+    }
+
+    fn decode_shift_jis(bytes: &[u8]) -> Result<String> {
+        let (text, _, had_errors) = SHIFT_JIS.decode(bytes);
+
+        if had_errors {
+            return Err(invalid("String contains invalid Shift-JIS data"));
+        }
+
+        Ok(text.into_owned())
+    }
+
+    fn decode_utf16(units: &[u16]) -> Result<String> {
+        String::from_utf16(units).map_err(|_| invalid("Invalid UTF-16 string"))
     }
 
     //region ASCII / UTF-8
 
     pub fn read_ascii(&mut self) -> Result<String> {
-        let bytes = self.read_cstring_bytes()?;
-
-        if !bytes.is_ascii() {
-            return Err(BinaryReaderError::InvalidData(
-                "String contains non-ASCII bytes".into(),
-            ));
-        }
-
-        Ok(String::from_utf8(bytes).map_err(|_| {
-            BinaryReaderError::InvalidData(
-                "Invalid ASCII string".into(),
-            )
-        })?)
+        Self::decode_ascii(self.read_cstring_slice()?)
     }
 
-    pub fn read_ascii_fixed(
-        &mut self,
-        length: usize,
-    ) -> Result<String> {
-        let bytes = self.read_bytes(length)?;
-
-        let end = bytes
-            .iter()
-            .position(|&byte| byte == 0)
-            .unwrap_or(bytes.len());
-
-        let bytes = &bytes[..end];
-
-        if !bytes.is_ascii() {
-            return Err(BinaryReaderError::InvalidData(
-                "String contains non-ASCII bytes".into(),
-            ));
-        }
-
-        Ok(String::from_utf8(bytes.to_vec()).map_err(|_| {
-            BinaryReaderError::InvalidData(
-                "Invalid ASCII string".into(),
-            )
-        })?)
+    pub fn read_ascii_fixed(&mut self, length: usize) -> Result<String> {
+        Self::decode_ascii(self.read_fixed_slice(length)?)
     }
 
     pub fn read_utf8(&mut self) -> Result<String> {
-        let bytes = self.read_cstring_bytes()?;
-
-        String::from_utf8(bytes).map_err(|_| {
-            BinaryReaderError::InvalidData(
-                "Invalid UTF-8 string".into(),
-            )
-        })
+        Self::decode_utf8(self.read_cstring_slice()?)
     }
 
-    pub fn read_utf8_fixed(
-        &mut self,
-        length: usize,
-    ) -> Result<String> {
-        let bytes = self.read_bytes(length)?;
-
-        let end = bytes
-            .iter()
-            .position(|&byte| byte == 0)
-            .unwrap_or(bytes.len());
-
-        String::from_utf8(bytes[..end].to_vec()).map_err(|_| {
-            BinaryReaderError::InvalidData(
-                "Invalid UTF-8 string".into(),
-            )
-        })
+    pub fn read_utf8_fixed(&mut self, length: usize) -> Result<String> {
+        Self::decode_utf8(self.read_fixed_slice(length)?)
     }
 
     //region Shift-JIS
 
     pub fn read_shift_jis(&mut self) -> Result<String> {
-        let bytes = self.read_cstring_bytes()?;
-
-        let (text, _, had_errors) = SHIFT_JIS.decode(&bytes);
-
-        if had_errors {
-            return Err(BinaryReaderError::InvalidData(
-                "String contains invalid Shift-JIS data".into(),
-            ));
-        }
-
-        Ok(text.into_owned())
+        Self::decode_shift_jis(self.read_cstring_slice()?)
     }
 
-    pub fn read_shift_jis_fixed(
-        &mut self,
-        length: usize,
-    ) -> Result<String> {
-        let bytes = self.read_bytes(length)?;
-
-        let end = bytes
-            .iter()
-            .position(|&byte| byte == 0)
-            .unwrap_or(bytes.len());
-
-        let (text, _, had_errors) = SHIFT_JIS.decode(&bytes[..end]);
-
-        if had_errors {
-            return Err(BinaryReaderError::InvalidData(
-                "String contains invalid Shift-JIS data".into(),
-            ));
-        }
-
-        Ok(text.into_owned())
+    pub fn read_shift_jis_fixed(&mut self, length: usize) -> Result<String> {
+        Self::decode_shift_jis(self.read_fixed_slice(length)?)
     }
 
     //region Length-prefixed strings
 
+    /// Reads a length of type `L`, then that many bytes as UTF-8.
+    pub fn read_string_prefixed<L>(&mut self) -> Result<String>
+    where
+        L: Readable + TryInto<usize>,
+    {
+        let length: usize = self
+            .read::<L>()?
+            .try_into()
+            .map_err(|_| invalid("String length prefix doesn't fit in usize"))?;
+
+        Self::decode_utf8(self.read_slice(length)?)
+    }
+
     pub fn read_string_u8(&mut self) -> Result<String> {
-        let length = self.read_u8()? as usize;
-        self.read_utf8_bytes(length)
+        self.read_string_prefixed::<u8>()
     }
 
     pub fn read_string_u16(&mut self) -> Result<String> {
-        let length = self.read_u16()? as usize;
-        self.read_utf8_bytes(length)
+        self.read_string_prefixed::<u16>()
     }
 
     pub fn read_string_u32(&mut self) -> Result<String> {
-        let length = usize::try_from(self.read_u32()?)?;
-        self.read_utf8_bytes(length)
-    }
-
-    fn read_utf8_bytes(&mut self, length: usize) -> Result<String> {
-        let bytes = self.read_bytes(length)?;
-
-        String::from_utf8(bytes).map_err(|_| {
-            BinaryReaderError::InvalidData(
-                "Invalid UTF-8 string".into(),
-            )
-        })
+        self.read_string_prefixed::<u32>()
     }
 
     //region UTF-16
@@ -644,177 +555,19 @@ impl<'a> BinaryReader<'a> {
         let mut units = Vec::new();
 
         loop {
-            let unit = self.read_u16()?;
-
-            if unit == 0 {
-                break;
-            }
-
-            units.push(unit);
-        }
-
-        String::from_utf16(&units).map_err(|_| {
-            BinaryReaderError::InvalidData(
-                "Invalid UTF-16 string".into(),
-            )
-        })
-    }
-
-    pub fn read_utf16_fixed(
-        &mut self,
-        units: usize,
-    ) -> Result<String> {
-        let mut encoded = Vec::with_capacity(units);
-
-        for _ in 0..units {
-            encoded.push(self.read_u16()?);
-        }
-
-        let end = encoded
-            .iter()
-            .position(|&unit| unit == 0)
-            .unwrap_or(encoded.len());
-
-        String::from_utf16(&encoded[..end]).map_err(|_| {
-            BinaryReaderError::InvalidData(
-                "Invalid UTF-16 string".into(),
-            )
-        })
-    }
-
-    //region C strings
-
-    fn read_cstring_bytes(&mut self) -> Result<Vec<u8>> {
-        let start = self.position();
-
-        while !self.is_at_end() {
-            if self.read_u8()? == 0 {
-                let end = self.position() - 1;
-
-                return Ok(self.data.get_ref()
-                    [start as usize..end as usize]
-                    .to_vec());
+            match self.read_u16()? {
+                0 => break,
+                unit => units.push(unit),
             }
         }
 
-        Err(BinaryReaderError::UnexpectedEof {
-            position: start,
-            requested: 1,
-            remaining: 0,
-        })
+        Self::decode_utf16(&units)
     }
 
-    //region Peek
+    pub fn read_utf16_fixed(&mut self, units: usize) -> Result<String> {
+        let encoded = self.read_vec::<u16>(units)?;
+        let end = encoded.iter().position(|&u| u == 0).unwrap_or(encoded.len());
 
-    pub fn peek_u8(&mut self) -> Result<u8> {
-        let position = self.position();
-        let value = self.read_u8()?;
-        self.set_position(position)?;
-        Ok(value)
-    }
-
-    pub fn peek_u16(&mut self) -> Result<u16> {
-        let position = self.position();
-        let value = self.read_u16()?;
-        self.set_position(position)?;
-        Ok(value)
-    }
-
-    pub fn peek_u32(&mut self) -> Result<u32> {
-        let position = self.position();
-        let value = self.read_u32()?;
-        self.set_position(position)?;
-        Ok(value)
-    }
-
-    pub fn peek_u64(&mut self) -> Result<u64> {
-        let position = self.position();
-        let value = self.read_u64()?;
-        self.set_position(position)?;
-        Ok(value)
-    }
-
-    //region Read at offset
-
-    pub fn read_at(
-        &mut self,
-        offset: u64,
-        length: usize,
-    ) -> Result<Vec<u8>> {
-        let old_position = self.position();
-
-        self.set_position(offset)?;
-
-        let result = self.read_bytes(length);
-
-        self.set_position(old_position)?;
-
-        result
-    }
-
-    pub fn read_u8_at(&mut self, offset: u64) -> Result<u8> {
-        let old_position = self.position();
-
-        self.set_position(offset)?;
-        let result = self.read_u8();
-        self.set_position(old_position)?;
-
-        result
-    }
-
-    pub fn read_u32_at(&mut self, offset: u64) -> Result<u32> {
-        let old_position = self.position();
-
-        self.set_position(offset)?;
-        let result = self.read_u32();
-        self.set_position(old_position)?;
-
-        result
-    }
-
-    pub fn read_u64_at(&mut self, offset: u64) -> Result<u64> {
-        let old_position = self.position();
-
-        self.set_position(offset)?;
-        let result = self.read_u64();
-        self.set_position(old_position)?;
-
-        result
+        Self::decode_utf16(&encoded[..end])
     }
 }
-
-
-
-pub trait Readable: Sized {
-    fn read_from(reader: &mut BinaryReader) -> Result<Self>;
-}
-
-macro_rules! impl_readable {
-    ($($ty:ty => $method:ident),* $(,)?) => {
-        $(
-            impl Readable for $ty {
-                #[inline]
-                fn read_from(reader: &mut BinaryReader) -> Result<Self> {
-                    reader.$method()
-                }
-            }
-        )*
-    };
-}
-
-impl_readable! {
-    u8   => read_u8,
-    i8   => read_i8,
-    u16  => read_u16,
-    i16  => read_i16,
-    u32  => read_u32,
-    i32  => read_i32,
-    u64  => read_u64,
-    i64  => read_i64,
-    u128 => read_u128,
-    i128 => read_i128,
-    f32  => read_f32,
-    f64  => read_f64,
-    bool => read_boolean,
-}
-
