@@ -16,5 +16,6 @@ This project is under GPL3 because Soulstruct is, even if there's no actual Soul
  - Basic binary readers and writers
  - Regulation decryption (not fully parsed as of now)
  - Basic outline for TPF handling, not ready for use yet
- - Raw parsing and handling for FMGs
+ - Complete parsing and handling for FMGs
+ - Complete parsing and handling for shoebox layouts
  - Basic parsing for all major non-split binder versions
