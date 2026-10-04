@@ -1,6 +1,12 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Index, path::Path};
 
-use crate::{binary::{BinaryReader, BinaryWriter, IO}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
+use bitflags::Flags;
+
+use crate::binary::{BinaryReader, BinaryWriter, IO};
+use crate::binders::bnd4::BND4EntryHeader;
+use crate::binders::{Binder, BinderEntry, BinderFlags, BinderVersion, bnd4::{BND4, BND4Entry, BND4Header}};
+use crate::dcx::DCXType;
+use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 
 
 
@@ -28,9 +34,6 @@ impl FMGVersion {
             Self::DES => Ok(0u8),
             Self::DS1 => Ok(1u8),
             Self::DS3 => Ok(2u8),
-            _=> Err(BinaryWriterError::InvalidData(
-                format!("Invalid FMG version read: {:?}", self)
-            ))
         }
     }
 }
@@ -40,8 +43,20 @@ pub struct FMGEntry {
     pub text: String
 }
 
+impl BinderEntry for FMGEntry {
+    type Identifier = usize;
+
+    fn identity(&self) -> &Self::Identifier {
+        &self.id
+    }
+}
+
+
+
 pub struct FMG {
+    name: Option<String>, // not serialized, used for convenience
     version: FMGVersion, 
+    header: Option<BND4EntryHeader>,
 
     big_endian: bool,
     unicode: bool,
@@ -53,8 +68,10 @@ pub struct FMG {
 }
 
 impl FMG {
-    pub fn new(version: FMGVersion, hash: bool, reuse_offsets: bool) -> Self {
+    pub fn new(name: Option<String>, version: FMGVersion, hash: bool, reuse_offsets: bool) -> Self {
         Self {
+            name,
+            header: None,
             big_endian: (version==FMGVersion::DES),
             version,
             unicode: true,
@@ -118,9 +135,9 @@ impl FMG {
 
 }
 
-impl FMG {
+impl IO for FMG {
     fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
-        let is_hash = reader.read_u8()? != 0u8;
+        let is_hash = reader.peek::<bool>()?;
         if is_hash {
             reader.set_position(reader.position()+16);
         }
@@ -214,7 +231,9 @@ impl FMG {
 
         Ok(
             Self {
+                name: None,
                 version,
+                header: None,
                 big_endian,
                 unicode,
                 hash: is_hash,
@@ -256,33 +275,35 @@ impl FMG {
         writer.write_varint(0i64)?;
 
         let mut group_count = 0;
-        self.sort_entries();
-        for (mut idx,e) in self.entries.iter().enumerate() {
-            writer.write_i32(idx as i32)?;
-            writer.write_i32(e.id as i32)?;
+        let mut i = 0;
+        while i < self.entries.len() {
+            let start = i;
 
-            while (idx < self.entries.len() - 1) 
-                && self.entries[idx+1].id
-                   == self.entries[idx].id + 1
-                {idx+=1;}
-
-            writer.write_i32(self.entries.get(idx).unwrap().id as i32)?;
-
-            if long {
-                writer.write_i32(0i32)?;
+            while i + 1 < self.entries.len()
+                && self.entries[i + 1].id == self.entries[i].id + 1 {
+                i += 1;
             }
 
-            group_count+=1;
+            writer.write_i32(start as i32)?;
+            writer.write_i32(self.entries[start].id as i32)?;
+            writer.write_i32(self.entries[i].id as i32)?;
+
+            if long {   
+                writer.write_i32(0)?;
+            }
+
+            group_count += 1;
+            i += 1;
         }
 
         writer.fill("GroupCount".to_string(), group_count)?;
-        writer.fill("StringOffsets".to_string(), writer.position() as i64)?;
+        writer.fill_varint("StringOffsets".to_string(), writer.position() as i64)?;
         
         for i in 0..self.entries.len() {
             writer.reserve_varint(format!("StringOffset{i}"))?;
         }
 
-        self.write_strings(writer, self.reuse_offsets);
+        self.write_strings(writer, self.reuse_offsets)?;
 
         writer.fill("FileSize".to_string(), writer.position() as i32)?;
 
@@ -295,3 +316,140 @@ impl FMG {
 
 }
 
+impl FMG {
+    pub fn from_entry(entry: &BND4Entry) -> Result<Self, BinaryReaderError> {
+        let mut fmg = Self::from_bytes(&entry.data)?;
+        fmg.name = entry.name.clone();
+        fmg.header = Some(entry.header.clone());
+        Ok(fmg)
+    }
+
+    pub fn to_entry(&mut self) -> Result<BND4Entry, BinaryWriterError> {
+        let mut writer = BinaryWriter::new(true, false);
+        self.to_writer(&mut writer)?;
+
+        let header = self.header.clone().ok_or_else(|| {
+            BinaryWriterError::Custom("FMG has no BND4 entry header; cannot repack".into())
+        })?;
+
+        Ok(BND4Entry {
+            name: self.name.clone(),
+            header,
+            data: writer.into_inner(),
+        })
+    }
+
+}
+
+impl Binder for FMG {
+    const VERSION: BinderVersion = BinderVersion::V4;
+    type Entry = FMGEntry;
+
+    fn entries(&mut self) -> &mut Vec<Self::Entry> {
+        &mut self.entries
+    }
+}
+
+impl BinderEntry for FMG {
+    type Identifier = Option<String>;
+
+    fn identity(&self) -> &Self::Identifier {
+        &self.name
+    }
+}
+
+
+
+pub struct FMGBinder {
+    header: BND4Header,
+    entries: Vec<FMG>
+}
+
+impl IO for FMGBinder {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+        let mut bnd = BND4::from_reader(reader)?;
+        Self::from_binder(&mut bnd)
+            .map_err(|e| BinaryReaderError::Custom(e.to_string()))
+    }
+
+    fn from_binder(binder: &mut BND4) -> Result<Self, BinaryReaderError> {
+        let entries: Vec<FMG> = binder.iter_mut()
+            .map(|e| FMG::from_entry(e))
+            .collect::<Result<Vec<_>, _>>()?;
+        
+        Ok(
+            Self { 
+                header: binder.header.clone(), 
+                entries
+            }
+        )
+    }
+    
+    fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
+        let mut writer = BinaryWriter::default();
+
+        let mut bnd = unsafe { self.pack() }
+            .map_err(|e| BinaryWriterError::Custom(e.to_string()))?;
+        bnd.to_writer(&mut writer)?;
+
+        Ok(writer)
+    }
+
+    ///Decompresses self as a BND4 from `path`. Also returns detected `DCXType`
+    unsafe fn unpack(path: &Path) -> Result<(Self, DCXType), BinaryReaderError> {
+        let (mut binder, dcxtype) = unsafe { BND4::unpack(path)?};
+        Ok((Self::from_binder(&mut binder)?, dcxtype))
+    }
+
+    ///Packs list of `FMG`s into a new BND4 with a provided header.
+    /// 
+    ///You may then want to call `to_file` on the resulting binder to compress and write.
+    unsafe fn pack(&mut self) -> Result<BND4, BinaryWriterError> {
+        let entries = self.entries.iter_mut()
+            .map(|e| e.to_entry())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(BND4 {
+            header: self.header.clone(),
+            entries
+        })
+    }
+
+}
+
+impl Binder for FMGBinder {
+    const VERSION: BinderVersion = BinderVersion::V4;
+    type Entry = FMG;
+
+    fn entries(&mut self) -> &mut Vec<Self::Entry> {
+        &mut self.entries
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::{dcx::CompressSettings, oodle::{core::init_oodle, structs::OodleSettings}};
+    use super::*;
+
+    #[test]
+    fn test_msg() {
+        unsafe {init_oodle(Path::new("tests/oo2core_6_win64.dll"));}
+
+        let (mut fmg, dcx_type) = unsafe { FMGBinder::unpack(Path::new("tests/item.msgbnd.dcx")).unwrap() };
+
+        for e in fmg.iter_mut() {
+            for f in e.iter_mut() {
+                f.text = String::from("fish")
+            }
+        }
+
+        let mut binder = unsafe { fmg.pack().unwrap() };
+        unsafe {
+        binder.to_file(
+            Path::new(r"C:/Users/lstr/Downloads/test.msgbnd.dcx"),
+            CompressSettings::Oodle(dcx_type, OodleSettings::KRAK)
+        ).unwrap();
+        }
+    }
+}

@@ -1,6 +1,6 @@
 /// Logic adapted from SoulsFormatsNext and Constrata
 
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt::Debug};
 use std::collections::HashMap;
 
 use encoding_rs::SHIFT_JIS;
@@ -165,7 +165,7 @@ impl BinaryWriter {
     fn end_after(&self, count: usize) -> Result<usize> {
         self.position
             .checked_add(count)
-            .ok_or_else(|| invalid("Writer position overflow"))
+            .ok_or_else(|| invalid("Writer position overflow!"))
     }
 
     pub fn skip(&mut self, count: u64) -> Result<()> {
@@ -571,13 +571,16 @@ impl BinaryWriter {
     }
 
     /// Fills a reservation and consumes it. `T` must match the size it was reserved with.
-    pub fn fill<T: Writable>(&mut self, name: impl AsRef<str>, value: T) -> Result<()> {
+    pub fn fill<T: Writable>(&mut self, name: impl AsRef<str>, value: T) -> Result<()> where T: Debug {
         let name = name.as_ref();
 
         let res = *self
             .reservations
             .get(name)
-            .ok_or_else(|| BinaryWriterError::custom("Reservation doesn't exist!"))?;
+            .ok_or_else(|| BinaryWriterError::Custom(
+                format!("Reservation doesn't exist! Name: {}, Value: {:?}",
+                name, value)
+            ))?;
 
         if T::SIZE != res.length {
             return Err(invalid(format!(

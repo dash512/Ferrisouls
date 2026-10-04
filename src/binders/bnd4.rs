@@ -310,7 +310,7 @@ impl BND4Entry {
 
         let data = if header.flags.is_compressed() {
             let (data, _) = unsafe { Decompress::raw(&stored_data) }
-                .map_err(|e| BinaryReaderError::custom(e.to_string()))?;
+                .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
 
             let expected_size = header.uncompressed_size
                 .ok_or_else(|| BinaryReaderError::custom(
@@ -342,7 +342,7 @@ impl BND4Entry {
         let stored_data = if self.header.flags.is_compressed() {
             let compset = CompressSettings::Oodle(DCXType::DCX_KRAK, OodleSettings::KRAK);
             unsafe { Compress::raw(&self.data, &compset) }
-                .map_err(|e| BinaryWriterError::custom(e.to_string()))?
+                .map_err(|e| BinaryWriterError::Custom(e.to_string()))?
 
         } else {
             self.data.clone()

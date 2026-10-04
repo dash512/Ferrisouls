@@ -5,7 +5,7 @@ pub mod write;
 pub use read::BinaryReader;
 pub use write::BinaryWriter;
 use zstd::zstd_safe::WriteBuf;
-use crate::{dcx::{Compress, CompressSettings, DCXType, Decompress}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
+use crate::{binders::bnd4::BND4, dcx::{Compress, CompressSettings, DCXType, Decompress}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
 use std::{borrow::Cow, fs::File, io::{Read, Write}, path::Path};
 
 /// Decompresses `data` if it starts with a DCX/DCP magic, otherwise borrows it unchanged.
@@ -48,6 +48,10 @@ pub trait IO {
         Self::from_file(&File::open(path)?)
     }
 
+    fn from_binder(binder: &mut BND4) -> Result<Self, BinaryReaderError> where Self: Sized {
+        unimplemented!()
+    }
+
     ///Similar to `from_path`, but handles the case where the source file is DCX compressed.
     /// 
     ///If the file Path ends in `.dcx`, decompresses the file, calling `from_bytes` on the data. 
@@ -56,7 +60,7 @@ pub trait IO {
     where Self: Sized {
         let data = std::fs::read(path)?;
         let (bytes, dt) = unsafe { decompress_if_needed(&data) }
-            .map_err(|e| BinaryReaderError::custom(e.to_string()))?;
+            .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
         Ok((Self::from_bytes(&bytes)?, dt))
     }
 
@@ -86,13 +90,18 @@ pub trait IO {
     unsafe fn to_file(&mut self, path: &Path, settings: CompressSettings) -> Result<(), BinaryWriterError> {
         let bytes = self.to_bytes()?;
         let compressed = unsafe { Compress::raw(&bytes, &settings) }
-            .map_err(|e| BinaryWriterError::custom(e.to_string()))?;
+            .map_err(|e| BinaryWriterError::Custom(e.to_string()))?;
 
         let mut file = File::create_new(path)
             .map_err(|e| BinaryWriterError::custom(format!("{}: {}", path.display(), e)))?;
         file.write_all(&compressed).map_err(BinaryWriterError::io)?;
-        
+
         Ok(())
+    }
+
+    ///Pack self into a BND4 to write. Unimplemented by default. Will panic if called before implementation.
+    unsafe fn pack(&mut self) -> Result<BND4, BinaryWriterError> {
+        unimplemented!()
     }
 
 }

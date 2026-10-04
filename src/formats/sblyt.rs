@@ -6,12 +6,14 @@ use crate::binders::bnd4::{BND4Entry, BND4EntryHeader, BND4Header};
 use crate::binders::{Binder, BinderEntry, BinderVersion, bnd4::BND4};
 use crate::dcx::DCXType;
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
+use crate::games::Game;
 
 use roxmltree::{Document, Node};
 use xmlwriter::{Indent, Options, XmlWriter};
 
 
 #[derive(Debug)]
+///Represents a single SubTexture entry in a layout XML
 pub struct Subtexture {
     name: String,
 
@@ -46,13 +48,13 @@ impl Subtexture {
         let original_width = node.attribute("originalWidth")
             .map(|x| x.trim()
                 .parse::<u16>()
-                .map_err(|e| BinaryReaderError::custom(e.to_string())))
+                .map_err(|e| BinaryReaderError::Custom(e.to_string())))
             .transpose()?;  
 
         let original_height: Option<u16> = node.attribute("originalHeight")
             .map(|x| x.trim()
                 .parse::<u16>()
-                .map_err(|e| BinaryReaderError::custom(e.to_string())))
+                .map_err(|e| BinaryReaderError::Custom(e.to_string())))
             .transpose()?;
         
         Ok(
@@ -92,6 +94,7 @@ impl Subtexture {
 
 
 #[derive(Debug)]
+///Represents a `.layout` file inside a BND4
 pub struct Layout {
     _header: BND4EntryHeader, // used when repacking the layout
 
@@ -123,12 +126,12 @@ impl BinderEntry for Layout {
 }
 
 impl Layout {
-    pub fn from_entry(entry: &mut BND4Entry) -> Result<Self, BinaryReaderError> {
-        let raw_xml = str::from_utf8(&entry.data)
-            .map_err(|e| BinaryReaderError::custom(e.to_string()))?;
+    pub fn from_bytes(name: Option<String>, header: BND4EntryHeader, data: &[u8]) -> Result<Self, BinaryReaderError> {
+        let raw_xml = str::from_utf8(data)
+            .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
 
         let doc = Document::parse(&raw_xml)
-            .map_err(|e| BinaryReaderError::custom(e.to_string()))?;
+            .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
 
         let root = doc.root_element();
 
@@ -148,16 +151,16 @@ impl Layout {
         match root.attribute("width") {
             Some(w) => {
                 let width = root.attribute("width")
-                    .map(|w| w.trim().parse::<u16>().map_err(|e| BinaryReaderError::custom(e.to_string())))
+                    .map(|w| w.trim().parse::<u16>().map_err(|e| BinaryReaderError::Custom(e.to_string())))
                     .transpose()?;
                 let height = root.attribute("height")
-                    .map(|h| h.trim().parse::<u16>().map_err(|e| BinaryReaderError::custom(e.to_string())))
+                    .map(|h| h.trim().parse::<u16>().map_err(|e| BinaryReaderError::Custom(e.to_string())))
                     .transpose()?;
                 let root_dimensions = width.is_some() || height.is_some();
 
                 Ok(Self {
-                    _header: entry.header.clone(),
-                    name: entry.name.clone(),
+                    _header: header,
+                    name,
                     image_path,
                     width,
                     height,
@@ -167,8 +170,8 @@ impl Layout {
             },
             None => {
                 Ok(Self {
-                    _header: entry.header.clone(),
-                    name: entry.name.clone(),
+                    _header: header,
+                    name,
                     image_path,
                     width: None,
                     height: None,
@@ -178,6 +181,10 @@ impl Layout {
             }
         }
 
+    }
+
+    pub fn from_entry(entry: &mut BND4Entry) -> Result<Self, BinaryReaderError> {
+        Self::from_bytes(entry.name.clone(), entry.header.clone(), &entry.data)
     }
 
     ///Recompiles self as xml data and returns a `BND4Entry`.
@@ -212,6 +219,16 @@ impl Layout {
         })
     }
 
+    pub fn get_image_path(game: Game, name: &str, resolution: &str) -> String {
+        match game {
+            Game::NR => format!(r"W:\CL\data\Target\INTERROOT_win64\menu\ScaleForm\Tif\01_Common\{resolution}\{name}.tif"),
+
+            Game::AC6 => format!(r"W:\FNR\data\Menu\ScaleForm\Tif\01_Common\{name}\{resolution}\exp\{name}.png"),
+
+            _=> format!("{name}.png") // SDT/ER
+        }
+    }
+    
 }
 
 
@@ -235,30 +252,10 @@ impl IO for LayoutBinder {
     fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         let mut bnd = BND4::from_reader(reader)?;
         Self::from_binder(&mut bnd)
-            .map_err(|e| BinaryReaderError::custom(e.to_string()))
+            .map_err(|e| BinaryReaderError::Custom(e.to_string()))
     }
 
-    fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
-        let mut writer = BinaryWriter::default();
-
-        let mut bnd = unsafe { self.pack() }
-            .map_err(|e| BinaryWriterError::custom(e.to_string()))?;
-        bnd.to_writer(&mut writer)?;
-
-        Ok(writer)
-    }
-
-    ///Decompresses self as a BND4 from `path`. Also returns detected `DCXType`
-    unsafe fn unpack(path: &Path) -> Result<(Self, DCXType), BinaryReaderError> {
-        let (mut binder, dcxtype) = unsafe { BND4::unpack(path)?};
-        Ok((Self::from_binder(&mut binder)?, dcxtype))
-    }
-}
-
-impl LayoutBinder {
-    //Read
-
-    pub fn from_binder(binder: &mut BND4) -> Result<Self, BinaryReaderError> {
+    fn from_binder(binder: &mut BND4) -> Result<Self, BinaryReaderError> {
         let entries: Vec<Layout> = binder.iter_mut()
             .map(Layout::from_entry)
             .collect::<Result<Vec<_>, _>>()?;
@@ -270,13 +267,27 @@ impl LayoutBinder {
             }
         )
     }
-
-    //Write
     
+    fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
+        let mut writer = BinaryWriter::default();
+
+        let mut bnd = unsafe { self.pack() }
+            .map_err(|e| BinaryWriterError::Custom(e.to_string()))?;
+        bnd.to_writer(&mut writer)?;
+
+        Ok(writer)
+    }
+
+    ///Decompresses self as a BND4 from `path`. Also returns detected `DCXType`
+    unsafe fn unpack(path: &Path) -> Result<(Self, DCXType), BinaryReaderError> {
+        let (mut binder, dcxtype) = unsafe { BND4::unpack(path)?};
+        Ok((Self::from_binder(&mut binder)?, dcxtype))
+    }
+
     ///Packs list of `Layout`s into a new BND4 with a provided header.
     /// 
     ///You may then want to call `to_file` on the resulting binder to compress and write.
-    pub unsafe fn pack(&mut self) -> Result<BND4, FerrisoulsError> {
+    unsafe fn pack(&mut self) -> Result<BND4, BinaryWriterError> {
         Ok(BND4 {
             header: self.header.clone(),
             entries: {
