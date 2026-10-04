@@ -128,18 +128,12 @@ impl BinderFlags {
     }
 
     pub fn to_byte(self, bit_big_endian: bool) -> u8 {
-        let format = self.bits();
-
-        let reverse =
-            bit_big_endian
-            || (self.contains(Self::IS_BIG_ENDIAN) && self.contains(Self::FLAG_6));
-
-        if reverse {
-            format as u8
-        } else {
-            format.reverse_bits() as u8
-        }
+        let b = self.bits() as u8;
+        let keep = bit_big_endian
+            || (self.contains(Self::IS_BIG_ENDIAN) && !self.contains(Self::FLAG_7));
+        if keep { b } else { b.reverse_bits() }
     }
+    
 }
 
 
@@ -160,13 +154,8 @@ impl EntryFlags {
     }
 
     pub fn to_byte(self, bit_big_endian: bool) -> u8 {
-        let value = self.bits();
-
-        if bit_big_endian {
-            value as u8
-        } else {
-            value.reverse_bits() as u8
-        }
+        let b = self.bits() as u8;
+        if bit_big_endian { b } else { b.reverse_bits() }
     }
 
     pub fn is_compressed(&self) -> bool {
@@ -182,7 +171,7 @@ impl EntryFlags {
 /// Expects a BinderVersion, and an `Entry` type corresponding to the entries/files stored in this Binder.
 /// 
 //TODO: add more required fns to allow more runtime modification to the Binder itself as well as its entries
-pub trait Binder: IO {
+pub trait Binder {
     const VERSION: BinderVersion; // BinderVersion
     type Entry: BinderEntry; 
 
@@ -220,7 +209,11 @@ pub trait Binder: IO {
         self.entries().len()
     }
 
-    fn iter(&mut self) -> std::slice::IterMut<'_, <Self as Binder>::Entry> {
+    fn iter(&mut self) -> std::slice::Iter<'_, <Self as Binder>::Entry> {
+        self.entries().iter()
+    }
+
+    fn iter_mut(&mut self) -> std::slice::IterMut<'_, <Self as Binder>::Entry> {
         self.entries().iter_mut()
     }
 
@@ -232,6 +225,14 @@ pub trait Binder: IO {
                 *e.identity() == id
             )
     }
+
+    /*TODO: a way to modify existing entries by finding it by a given entry's id and replacing it in-place
+    fn modify(&mut self, entry: <<Self as Binder>::Entry) -> Option<&Self::Entry> {
+        match self.find(*entry.identity()) {
+            Some(e) => 
+        }
+    }
+    */
 
     fn insert(&mut self, index: usize, entry: Self::Entry) -> &mut <Self as Binder>::Entry {
         self.entries().insert_mut(index, entry)
@@ -263,3 +264,32 @@ pub trait BinderEntry {
     fn identity(&self) -> &Self::Identifier;
 }
 
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use crate::{binary::decompress_if_needed, binders::bnd4::BND4, oodle::core::init_oodle};
+    use super::*;
+
+    #[test]
+    fn test_all_flags() {
+        for &bbe in &[false, true] {
+            let bad: Vec<u8> = (0u8..=255)
+                .filter(|&b| BinderFlags::from_byte(b, bbe).to_byte(bbe) != b)
+                .collect();
+            println!("bit_big_endian={bbe}: {} bad bytes: {:02X?}", bad.len(), bad);
+        }
+    }
+
+    #[test]
+    fn test_real_flags() {
+        unsafe { init_oodle(Path::new("tests/oo2core_6_win64.dll")) };
+        let data = std::fs::read("tests/01_common.sblytbnd.dcx").unwrap();
+        let (bytes, _) = unsafe { decompress_if_needed(&data) }.unwrap();
+        println!("original: unicode={:02X} flags={:02X} extended={:02X}", bytes[0x30], bytes[0x31], bytes[0x32]);
+
+        let (mut bnd, _) = unsafe { BND4::unpack(Path::new("tests/01_common.sblytbnd.dcx")) }.unwrap();
+        let out = bnd.to_bytes().unwrap();
+        println!("rewritten: unicode={:02X} flags={:02X} extended={:02X}", out[0x30], out[0x31], out[0x32]);
+    }
+}

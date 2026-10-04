@@ -5,8 +5,8 @@ pub mod write;
 pub use read::BinaryReader;
 pub use write::BinaryWriter;
 use zstd::zstd_safe::WriteBuf;
-use crate::{dcx::{DCXType, Decompress}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
-use std::{fs::File, path::Path, io::Read, borrow::Cow};
+use crate::{dcx::{Compress, CompressSettings, DCXType, Decompress}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
+use std::{borrow::Cow, fs::File, io::{Read, Write}, path::Path};
 
 /// Decompresses `data` if it starts with a DCX/DCP magic, otherwise borrows it unchanged.
 pub unsafe fn decompress_if_needed(data: &[u8]) -> Result<(Cow<'_, [u8]>, DCXType), FerrisoulsError> {
@@ -20,6 +20,9 @@ pub unsafe fn decompress_if_needed(data: &[u8]) -> Result<(Cow<'_, [u8]>, DCXTyp
 
 pub trait IO {
     //Read
+
+    ///Create new `Self` from a binary reader. Unimplemented by default. Will panic if called from any other
+    ///read methods without being implemented.
     fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> where Self: Sized {
         unimplemented!()
     }
@@ -59,7 +62,8 @@ pub trait IO {
 
     //Write
 
-    ///Append self to existing binary writer.
+    ///Append self to existing binary writer. Unimplemented by default. Will panic if called from any other
+    ///write methods without being implemented.
     fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         unimplemented!()
     }
@@ -78,7 +82,17 @@ pub trait IO {
         Ok(self.into_writer()?.into_inner())
     }
 
-    fn to_file(&self, path: &Path) -> Result<(), BinaryWriterError> {
-        todo!()
+    ///Writes self as bytes to a specified path, compressing if needed. Raises error if the file already exists.
+    unsafe fn to_file(&mut self, path: &Path, settings: CompressSettings) -> Result<(), BinaryWriterError> {
+        let bytes = self.to_bytes()?;
+        let compressed = unsafe { Compress::raw(&bytes, &settings) }
+            .map_err(|e| BinaryWriterError::custom(e.to_string()))?;
+
+        let mut file = File::create_new(path)
+            .map_err(|e| BinaryWriterError::custom(format!("{}: {}", path.display(), e)))?;
+        file.write_all(&compressed).map_err(BinaryWriterError::io)?;
+        
+        Ok(())
     }
+
 }

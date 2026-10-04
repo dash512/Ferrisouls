@@ -308,9 +308,6 @@ impl BND4Entry {
         let stored_data = reader.read_bytes(header.compressed_size as usize)?;
         reader.step_out()?;
 
-        eprintln!("entry {:?}: flags={:?} compressed={} first4={:02X?}",
-    name, header.flags, header.flags.is_compressed(), &stored_data[..stored_data.len().min(4)]);
-
         let data = if header.flags.is_compressed() {
             let (data, _) = unsafe { Decompress::raw(&stored_data) }
                 .map_err(|e| BinaryReaderError::custom(e.to_string()))?;

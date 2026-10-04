@@ -1263,9 +1263,9 @@ use super::*;
 
     #[test]
     fn test_compress() {
-        unsafe { init_oodle(Path::new(".../tests/oo2core_6_win64.dll")); }
+        unsafe { init_oodle(Path::new("tests/oo2core_6_win64.dll")); }
 
-        let file = Path::new(".../tests/01_common.sblytbnd.dcx");
+        let file = Path::new("tests/01_common.sblytbnd.dcx");
         let mut f = File::open(file).unwrap();
         let mut empty = Vec::new();
         f.read_to_end(&mut empty);

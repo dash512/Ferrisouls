@@ -219,13 +219,14 @@ pub enum BinaryWriterError {
     #[error("invalid data: {0}")]
     InvalidData(String),
 
-    #[error(
-        "out of bounds: offset {offset}, length {length}"
-    )]
+    #[error("out of bounds: offset {offset}, length {length}")]
     OutOfBounds {
         offset: u64,
         length: usize,
     },
+
+    #[error("I/O error: {0}")]
+    IO(std::io::Error)
 }
 
 impl BinaryWriterError {
@@ -235,6 +236,10 @@ impl BinaryWriterError {
 
     pub fn invalid_data(msg: impl Into<String>) -> Self {
         Self::InvalidData(msg.into())
+    }
+
+    pub fn io(error: std::io::Error) -> Self {
+        Self::IO(error)
     }
 
     pub fn out_of_bounds(
