@@ -74,17 +74,25 @@ pub struct BinaryWriter {
 
 /// Generates the endian-aware writers for the plain integer types.
 macro_rules! int_writers {
-    ($($name:ident: $ty:ty),* $(,)?) => {
+    ($($ty:ty => $name:ident, $le:ident, $be:ident);* $(;)?) => {
         $(
             #[inline]
             pub fn $name(&mut self, value: $ty) -> Result<()> {
-                let bytes = if self.big_endian {
-                    value.to_be_bytes()
+                if self.big_endian {
+                    self.$be(value)
                 } else {
-                    value.to_le_bytes()
-                };
+                    self.$le(value)
+                }
+            }
 
-                self.write_bytes(&bytes)
+            #[inline]
+            pub fn $le(&mut self, value: $ty) -> Result<()> {
+                self.write_bytes(&value.to_le_bytes())
+            }
+
+            #[inline]
+            pub fn $be(&mut self, value: $ty) -> Result<()> {
+                self.write_bytes(&value.to_be_bytes())
             }
         )*
     };
@@ -273,14 +281,14 @@ impl BinaryWriter {
     //region Integers & floats
 
     int_writers! {
-        write_u16: u16,
-        write_i16: i16,
-        write_u32: u32,
-        write_i32: i32,
-        write_u64: u64,
-        write_i64: i64,
-        write_u128: u128,
-        write_i128: i128,
+        u16  => write_u16,  write_u16_le,  write_u16_be;
+        i16  => write_i16,  write_i16_le,  write_i16_be;
+        u32  => write_u32,  write_u32_le,  write_u32_be;
+        i32  => write_i32,  write_i32_le,  write_i32_be;
+        u64  => write_u64,  write_u64_le,  write_u64_be;
+        i64  => write_i64,  write_i64_le,  write_i64_be;
+        u128 => write_u128, write_u128_le, write_u128_be;
+        i128 => write_i128, write_i128_le, write_i128_be;
     }
 
     #[inline]
@@ -294,7 +302,13 @@ impl BinaryWriter {
     }
 
     #[inline]
-    pub fn write_u24(&mut self, value: u32) -> Result<()> {
+    pub fn write_boolean(&mut self, value: bool) -> Result<()> {
+        self.write_u8(value as u8)
+    }
+
+    // 24-bit
+
+    fn write_u24_endian(&mut self, value: u32, big_endian: bool) -> Result<()> {
         if value > 0xFF_FFFF {
             return Err(invalid(format!("u24 value out of range: 0x{value:X}")));
         }
@@ -302,25 +316,66 @@ impl BinaryWriter {
         let le = value.to_le_bytes();
         let mut bytes = [le[0], le[1], le[2]];
 
-        if self.big_endian {
+        if big_endian {
             bytes.reverse();
         }
 
         self.write_bytes(&bytes)
     }
 
-    #[inline]
-    pub fn write_i24(&mut self, value: i32) -> Result<()> {
+    fn write_i24_endian(&mut self, value: i32, big_endian: bool) -> Result<()> {
         if !(-8_388_608..=8_388_607).contains(&value) {
             return Err(invalid(format!("i24 value out of range: {value}")));
         }
 
-        self.write_u24((value as u32) & 0xFF_FFFF)
+        self.write_u24_endian((value as u32) & 0xFF_FFFF, big_endian)
     }
+
+    #[inline]
+    pub fn write_u24(&mut self, value: u32) -> Result<()> {
+        self.write_u24_endian(value, self.big_endian)
+    }
+
+    #[inline]
+    pub fn write_u24_le(&mut self, value: u32) -> Result<()> {
+        self.write_u24_endian(value, false)
+    }
+
+    #[inline]
+    pub fn write_u24_be(&mut self, value: u32) -> Result<()> {
+        self.write_u24_endian(value, true)
+    }
+
+    #[inline]
+    pub fn write_i24(&mut self, value: i32) -> Result<()> {
+        self.write_i24_endian(value, self.big_endian)
+    }
+
+    #[inline]
+    pub fn write_i24_le(&mut self, value: i32) -> Result<()> {
+        self.write_i24_endian(value, false)
+    }
+
+    #[inline]
+    pub fn write_i24_be(&mut self, value: i32) -> Result<()> {
+        self.write_i24_endian(value, true)
+    }
+
+    // Floats
 
     #[inline]
     pub fn write_f32(&mut self, value: f32) -> Result<()> {
         self.write_u32(value.to_bits())
+    }
+
+    #[inline]
+    pub fn write_f32_le(&mut self, value: f32) -> Result<()> {
+        self.write_u32_le(value.to_bits())
+    }
+
+    #[inline]
+    pub fn write_f32_be(&mut self, value: f32) -> Result<()> {
+        self.write_u32_be(value.to_bits())
     }
 
     #[inline]
@@ -329,8 +384,13 @@ impl BinaryWriter {
     }
 
     #[inline]
-    pub fn write_boolean(&mut self, value: bool) -> Result<()> {
-        self.write_u8(value as u8)
+    pub fn write_f64_le(&mut self, value: f64) -> Result<()> {
+        self.write_u64_le(value.to_bits())
+    }
+
+    #[inline]
+    pub fn write_f64_be(&mut self, value: f64) -> Result<()> {
+        self.write_u64_be(value.to_bits())
     }
 
     //region Generic writing

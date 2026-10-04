@@ -328,9 +328,8 @@ impl FMG {
         let mut writer = BinaryWriter::new(true, false);
         self.to_writer(&mut writer)?;
 
-        let header = self.header.clone().ok_or_else(|| {
-            BinaryWriterError::Custom("FMG has no BND4 entry header; cannot repack".into())
-        })?;
+        let header = self.header.clone()
+            .ok_or_else(|| BinaryWriterError::custom("FMG has no BND4 entry header; cannot repack"))?;
 
         Ok(BND4Entry {
             name: self.name.clone(),

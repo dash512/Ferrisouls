@@ -74,18 +74,27 @@ pub struct BinaryReader<'a> {
 
 /// Generates the endian-aware readers for the plain integer types.
 macro_rules! int_readers {
-    ($($name:ident: $ty:ty),* $(,)?) => {
+    ($($ty:ty => $name:ident, $le:ident, $be:ident);* $(;)?) => {
         $(
             #[inline]
             pub fn $name(&mut self) -> Result<$ty> {
-                const N: usize = std::mem::size_of::<$ty>();
-                let bytes = self.read_array::<N>()?;
-
-                Ok(if self.big_endian {
-                    <$ty>::from_be_bytes(bytes)
+                if self.big_endian {
+                    self.$be()
                 } else {
-                    <$ty>::from_le_bytes(bytes)
-                })
+                    self.$le()
+                }
+            }
+
+            #[inline]
+            pub fn $le(&mut self) -> Result<$ty> {
+                const N: usize = std::mem::size_of::<$ty>();
+                Ok(<$ty>::from_le_bytes(self.read_array::<N>()?))
+            }
+
+            #[inline]
+            pub fn $be(&mut self) -> Result<$ty> {
+                const N: usize = std::mem::size_of::<$ty>();
+                Ok(<$ty>::from_be_bytes(self.read_array::<N>()?))
             }
         )*
     };
@@ -339,14 +348,14 @@ impl<'a> BinaryReader<'a> {
     //region Integers & floats
 
     int_readers! {
-        read_u16: u16,
-        read_i16: i16,
-        read_u32: u32,
-        read_i32: i32,
-        read_u64: u64,
-        read_i64: i64,
-        read_u128: u128,
-        read_i128: i128,
+        u16  => read_u16,  read_u16_le,  read_u16_be;
+        i16  => read_i16,  read_i16_le,  read_i16_be;
+        u32  => read_u32,  read_u32_le,  read_u32_be;
+        i32  => read_i32,  read_i32_le,  read_i32_be;
+        u64  => read_u64,  read_u64_le,  read_u64_be;
+        i64  => read_i64,  read_i64_le,  read_i64_be;
+        u128 => read_u128, read_u128_le, read_u128_be;
+        i128 => read_i128, read_i128_le, read_i128_be;
     }
 
     #[inline]
@@ -359,22 +368,62 @@ impl<'a> BinaryReader<'a> {
         Ok(self.read_u8()? as i8)
     }
 
-    #[inline]
-    pub fn read_u24(&mut self) -> Result<u32> {
+    pub fn read_boolean(&mut self) -> Result<bool> {
+        match self.read_u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            value => Err(invalid(format!("Invalid boolean: 0x{value:02X}"))),
+        }
+    }
+
+    // 24-bit
+
+    fn read_u24_endian(&mut self, big_endian: bool) -> Result<u32> {
         let mut bytes = self.read_array::<3>()?;
 
-        if self.big_endian {
+        if big_endian {
             bytes.reverse();
         }
 
         Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], 0]))
     }
 
+    fn read_i24_endian(&mut self, big_endian: bool) -> Result<i32> {
+        // Shift into the top 24 bits, then arithmetic-shift back to sign extend.
+        Ok(((self.read_u24_endian(big_endian)? << 8) as i32) >> 8)
+    }
+
+    #[inline]
+    pub fn read_u24(&mut self) -> Result<u32> {
+        self.read_u24_endian(self.big_endian)
+    }
+
+    #[inline]
+    pub fn read_u24_le(&mut self) -> Result<u32> {
+        self.read_u24_endian(false)
+    }
+
+    #[inline]
+    pub fn read_u24_be(&mut self) -> Result<u32> {
+        self.read_u24_endian(true)
+    }
+
     #[inline]
     pub fn read_i24(&mut self) -> Result<i32> {
-        // Shift into the top 24 bits, then arithmetic-shift back to sign extend.
-        Ok(((self.read_u24()? << 8) as i32) >> 8)
+        self.read_i24_endian(self.big_endian)
     }
+
+    #[inline]
+    pub fn read_i24_le(&mut self) -> Result<i32> {
+        self.read_i24_endian(false)
+    }
+
+    #[inline]
+    pub fn read_i24_be(&mut self) -> Result<i32> {
+        self.read_i24_endian(true)
+    }
+
+    // Floats
 
     #[inline]
     pub fn read_f32(&mut self) -> Result<f32> {
@@ -382,16 +431,28 @@ impl<'a> BinaryReader<'a> {
     }
 
     #[inline]
+    pub fn read_f32_le(&mut self) -> Result<f32> {
+        Ok(f32::from_bits(self.read_u32_le()?))
+    }
+
+    #[inline]
+    pub fn read_f32_be(&mut self) -> Result<f32> {
+        Ok(f32::from_bits(self.read_u32_be()?))
+    }
+
+    #[inline]
     pub fn read_f64(&mut self) -> Result<f64> {
         Ok(f64::from_bits(self.read_u64()?))
     }
 
-    pub fn read_boolean(&mut self) -> Result<bool> {
-        match self.read_u8()? {
-            0 => Ok(false),
-            1 => Ok(true),
-            value => Err(invalid(format!("Invalid boolean: 0x{value:02X}"))),
-        }
+    #[inline]
+    pub fn read_f64_le(&mut self) -> Result<f64> {
+        Ok(f64::from_bits(self.read_u64_le()?))
+    }
+
+    #[inline]
+    pub fn read_f64_be(&mut self) -> Result<f64> {
+        Ok(f64::from_bits(self.read_u64_be()?))
     }
 
     //region Varints (width depends on `varint_long`)
