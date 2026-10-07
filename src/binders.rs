@@ -1,7 +1,8 @@
 use std::{cmp::Ordering, path::Path};
 
 use bitflags::bitflags;
-use crate::{binary::{BinaryWriter, IO}, binders::bnd4::{BND4, BND4EntryHeader, BND4Header}, dcx::{self, DCXType}};
+use regex::Regex;
+use crate::{binary::{BinaryWriter, IO}, binders::{bnd4::{BND4, BND4EntryHeader, BND4Header}, identifiers::Identifier}, dcx::{self, DCXType}};
 pub use crate::binary::bytes::VariableUInt;
 use crate::binders::bnd4::BND4Entry;
 pub use crate::errors::{FerrisoulsError, BinaryReaderError, BinaryWriterError};
@@ -166,6 +167,68 @@ impl EntryFlags {
 }
 
 
+///Setup primitive types as Identifiers
+pub mod identifiers {
+    use super::Regex;
+
+    pub trait Identifier {
+        fn as_string(&self) -> String;
+
+        fn matches(&self, pattern: &Regex) -> bool;
+    }
+
+    impl Identifier for String {
+        fn as_string(&self) -> String {
+            self.clone()
+        }
+        fn matches(&self, pattern: &Regex) -> bool {
+            pattern.is_match(self)
+        }
+    }
+
+    impl<T> Identifier for Option<T> 
+    where T: Identifier
+    {
+        fn as_string(&self) -> String { 
+            match self {
+                Some(s) => s.as_string(),
+                None => panic!("as_string() called on a None option.")
+            }
+        }
+        fn matches(&self, pattern: &Regex) -> bool {
+            match self {
+                Some(s) => s.matches(pattern),
+                None => false
+            }
+        }
+    }
+
+    macro_rules! impl_primitive_identifiers {
+        ($($ty:ty),* $(,)?) => {
+            $(
+                impl Identifier for $ty {
+                    fn as_string(&self) -> String {
+                        self.to_string()
+                    }
+                    fn matches(&self, pattern: &Regex) -> bool {
+                        pattern.is_match(&self.as_string())
+                    }
+                }
+            )*
+        };
+    }
+
+    impl_primitive_identifiers!(
+        bool,
+        char,
+        u8, u16, u32, u64, u128,
+        i8, i16, i32, i64, i128,
+        usize, isize,
+        f32, f64,
+    );
+}
+
+
 
 /// This trait allows for basic handling of entries within any Binder that implements it.
 /// 
@@ -227,6 +290,20 @@ pub trait Binder {
             )
     }
 
+    ///Find all entries in self that match a given Regex pattern, applying `f` to each.
+    /// 
+    ///If `Self::Entry::Identifier` is an `Option`, None values will never match.
+    fn execute_regex<F>(&mut self, pattern: Regex, mut f: F) 
+    where 
+        F: FnMut(&mut <Self as Binder>::Entry)
+    {
+        for entry in self.entries().iter_mut() {
+            if entry.matches(&pattern) {
+                f(entry);
+            }
+        }
+    }
+
     /*TODO: a way to modify existing entries by finding it by a given entry's id and replacing it in-place
     fn modify(&mut self, entry: <<Self as Binder>::Entry) -> Option<&Self::Entry> {
         match self.find(*entry.identity()) {
@@ -260,9 +337,16 @@ pub trait Binder {
 /// 
 //TODO: implement more stuff here
 pub trait BinderEntry {
-    type Identifier: PartialEq; //.name / .id etc
+    type Identifier: PartialEq + identifiers::Identifier; //.name / .id etc
 
     fn identity(&self) -> &Self::Identifier;
+
+    ///Returns `true` if own identity matches given Regex pattern.
+    /// 
+    ///If `Self::Identifier` is an `Option`, None values will always return false.
+    fn matches(&self, pattern: &Regex) -> bool {
+        self.identity().matches(pattern)
+    }
 }
 
 
