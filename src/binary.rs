@@ -56,6 +56,8 @@ pub trait IO {
     /// 
     ///If the file Path ends in `.dcx`, decompresses the file, calling `from_bytes` on the data. 
     ///If not, calls `from_file` directly.
+    /// 
+    ///If you're trying to unpack a MetaBinder, use `unpack_binder()` instead.
     unsafe fn unpack(path: &Path) -> Result<(Self, DCXType), BinaryReaderError>
     where Self: Sized {
         let data = std::fs::read(path)?;
@@ -100,6 +102,8 @@ pub trait IO {
     }
 
     ///Pack self into a BND4 to write. Unimplemented by default. Will panic if called before implementation.
+    /// 
+    ///If you're trying to pack a MetaBinder, use `pack_binder()` instead.
     unsafe fn pack(&mut self) -> Result<BND4, BinaryWriterError> {
         unimplemented!()
     }

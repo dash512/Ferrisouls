@@ -1,8 +1,9 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, path::Path};
 
 use bitflags::bitflags;
-use crate::binary::IO;
+use crate::{binary::{BinaryWriter, IO}, binders::bnd4::{BND4, BND4EntryHeader, BND4Header}, dcx::{self, DCXType}};
 pub use crate::binary::bytes::VariableUInt;
+use crate::binders::bnd4::BND4Entry;
 pub use crate::errors::{FerrisoulsError, BinaryReaderError, BinaryWriterError};
 
 pub mod bnd;
@@ -263,6 +264,80 @@ pub trait BinderEntry {
 
     fn identity(&self) -> &Self::Identifier;
 }
+
+
+///Structs that implement this trait are typically identical to a generic BND4.
+/// 
+///This trait allows for converting between an intermediate representation for "special" binders.
+pub trait MetaBinder: IO + Binder {
+    fn new(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self;
+    fn header(&self) -> BND4Header;
+    
+    ///Decompresses self as a BND4 from `path`. Also returns detected `DCXType`
+    unsafe fn unpack_binder(path: &Path) -> Result<(Self, DCXType), BinaryReaderError>
+    where
+    Self: Sized,
+    Self::Entry: MetaEntry
+    {
+        let (mut binder, dcxtype) = unsafe { BND4::unpack(path)?};
+        let entries: Vec<Self::Entry> = binder.iter_mut()
+            .map(|e| Self::Entry::from_entry(e))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok((Self::new(binder.header.clone(), entries), dcxtype))
+    }
+
+    ///Packs list of `Self` into a new BND4 with a provided header.
+    /// 
+    ///You may then want to call `to_file` on the resulting binder to compress and write.
+    unsafe fn pack_binder(&mut self) -> Result<BND4, BinaryWriterError> where Self::Entry: MetaEntry {
+        let entries = self.entries().iter_mut()
+            .map(|e| e.to_entry())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(BND4 {
+            header: self.header(),
+            entries
+        })
+    }
+
+}
+
+///Structs that implement this trait are "meta-entries" of a generic BND4.
+/// 
+///They are typically just simple `BND4Entry`s, but have an intermediate representation when a part of their binder.
+pub trait MetaEntry: IO {
+
+    fn name(&self) -> Option<String>;
+    fn header(&self) -> Option<BND4EntryHeader>;
+
+    fn set_name(&mut self, name: &Option<String>);
+    fn set_header(&mut self, header: &BND4EntryHeader);
+
+    fn from_entry(entry: &mut BND4Entry) -> Result<Self, BinaryReaderError> where Self: Sized {
+        let mut new = Self::from_bytes(&entry.data)?;
+        new.set_name(&entry.name);
+        new.set_header(&entry.header);
+        Ok(new)
+    }
+
+    fn to_entry(&mut self) -> Result<BND4Entry, BinaryWriterError> {
+        let mut writer = BinaryWriter::new(true, false);
+        self.to_writer(&mut writer)?;
+
+        let header = self.header()
+            .ok_or_else(|| BinaryWriterError::custom("MetaEntry has no BND4 entry header; cannot repack"))?;
+
+        Ok(BND4Entry {
+            name: self.name(),
+            header,
+            data: writer.into_inner(),
+        })
+    }
+
+}
+
+
 
 
 #[cfg(test)]

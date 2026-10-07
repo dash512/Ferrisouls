@@ -2,6 +2,7 @@ use std::path::Path;
 use std::fmt::Write;
 
 use crate::binary::{BinaryReader, BinaryWriter, IO};
+use crate::binders::{MetaBinder, MetaEntry};
 use crate::binders::bnd4::{BND4Entry, BND4EntryHeader, BND4Header};
 use crate::binders::{Binder, BinderEntry, BinderVersion, bnd4::BND4};
 use crate::dcx::DCXType;
@@ -95,6 +96,13 @@ impl Subtexture {
 
 #[derive(Debug)]
 ///Represents a `.layout` file inside a BND4
+/// 
+///IMPORTANT:
+/// 
+///`Layout` does not properly implement `IO`, but the trait is required for `MetaEntry`'s defaults.
+///This struct's `to_entry` and `from_entry` implement them differently, so `IO` isn't needed.
+/// 
+///Attempting to call any `IO` functions on this struct will panic with `"not implemented"`.
 pub struct Layout {
     _header: BND4EntryHeader, // used when repacking the layout
 
@@ -126,7 +134,7 @@ impl BinderEntry for Layout {
 }
 
 impl Layout {
-    pub fn from_bytes(name: Option<String>, header: BND4EntryHeader, data: &[u8]) -> Result<Self, BinaryReaderError> {
+    fn from_bytes(name: Option<String>, header: BND4EntryHeader, data: &[u8]) -> Result<Self, BinaryReaderError> {
         let raw_xml = str::from_utf8(data)
             .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
 
@@ -182,13 +190,33 @@ impl Layout {
         }
 
     }
+}
 
-    pub fn from_entry(entry: &mut BND4Entry) -> Result<Self, BinaryReaderError> {
+impl IO for Layout {} // NOT IMPLEMENTED! Only used for MetaEntry
+
+impl MetaEntry for Layout {
+    fn header(&self) -> Option<BND4EntryHeader> {
+        Some(self._header.clone())
+    }
+
+    fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+
+    fn set_header(&mut self, header: &BND4EntryHeader) {
+        self._header = header.clone()
+    }
+
+    fn set_name(&mut self, name: &Option<String>) {
+        self.name = name.clone()
+    }
+
+    fn from_entry(entry: &mut BND4Entry) -> Result<Self, BinaryReaderError> {
         Self::from_bytes(entry.name.clone(), entry.header.clone(), &entry.data)
     }
 
     ///Recompiles self as xml data and returns a `BND4Entry`.
-    pub fn to_entry(&self) -> Result<BND4Entry, BinaryWriterError> {
+    fn to_entry(&mut self) -> Result<BND4Entry, BinaryWriterError> {
         let mut w = XmlWriter::new(Options {
             indent: Indent::Tabs,
             ..Options::default()
@@ -219,16 +247,6 @@ impl Layout {
         })
     }
 
-    pub fn get_image_path(game: Game, name: &str, resolution: &str) -> String {
-        match game {
-            Game::NR => format!(r"W:\CL\data\Target\INTERROOT_win64\menu\ScaleForm\Tif\01_Common\{resolution}\{name}.tif"),
-
-            Game::AC6 => format!(r"W:\FNR\data\Menu\ScaleForm\Tif\01_Common\{name}\{resolution}\exp\{name}.png"),
-
-            _=> format!("{name}.png") // SDT/ER
-        }
-    }
-    
 }
 
 
@@ -247,7 +265,6 @@ impl Binder for LayoutBinder {
     }
 }
 
-
 impl IO for LayoutBinder {
     fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
         let mut bnd = BND4::from_reader(reader)?;
@@ -255,19 +272,6 @@ impl IO for LayoutBinder {
             .map_err(|e| BinaryReaderError::Custom(e.to_string()))
     }
 
-    fn from_binder(binder: &mut BND4) -> Result<Self, BinaryReaderError> {
-        let entries: Vec<Layout> = binder.iter_mut()
-            .map(Layout::from_entry)
-            .collect::<Result<Vec<_>, _>>()?;
-        
-        Ok(
-            Self { 
-                header: binder.header.clone(), 
-                entries
-            }
-        )
-    }
-    
     fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
         let mut writer = BinaryWriter::default();
 
@@ -277,30 +281,17 @@ impl IO for LayoutBinder {
 
         Ok(writer)
     }
-
-    ///Decompresses self as a BND4 from `path`. Also returns detected `DCXType`
-    unsafe fn unpack(path: &Path) -> Result<(Self, DCXType), BinaryReaderError> {
-        let (mut binder, dcxtype) = unsafe { BND4::unpack(path)?};
-        Ok((Self::from_binder(&mut binder)?, dcxtype))
-    }
-
-    ///Packs list of `Layout`s into a new BND4 with a provided header.
-    /// 
-    ///You may then want to call `to_file` on the resulting binder to compress and write.
-    unsafe fn pack(&mut self) -> Result<BND4, BinaryWriterError> {
-        Ok(BND4 {
-            header: self.header.clone(),
-            entries: {
-                self.entries.iter()
-                    .map(|e| e.to_entry())
-                    .collect::<Result<Vec<_>, _>>()?
-            }
-        })
-    }
-
 }
 
+impl MetaBinder for LayoutBinder {
+    fn header(&self) -> BND4Header {
+        self.header.clone()
+    }
 
+    fn new(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
+        Self { header, entries }
+    }
+}
 
 fn parse_attr<T>(node: roxmltree::Node, name: &str) -> Result<T, BinaryReaderError>
 where
@@ -322,6 +313,18 @@ where
 }
 
 
+pub fn get_image_path(game: Game, name: &str, resolution: &str) -> String {
+    match game {
+        Game::NR => format!(r"W:\CL\data\Target\INTERROOT_win64\menu\ScaleForm\Tif\01_Common\{resolution}\{name}.tif"),
+
+        Game::AC6 => format!(r"W:\FNR\data\Menu\ScaleForm\Tif\01_Common\{name}\{resolution}\exp\{name}.png"),
+
+        _=> format!("{name}.png") // SDT/ER
+    }
+}
+
+
+
 
 #[cfg(test)]
 mod tests {
@@ -332,7 +335,7 @@ mod tests {
     fn full_layout_test() {
         unsafe { init_oodle(Path::new("tests/oo2core_6_win64.dll")) };
 
-        let (mut lyts, dcx_type) = unsafe { LayoutBinder::unpack(
+        let (mut lyts, dcx_type) = unsafe { LayoutBinder::unpack_binder(
             Path::new("tests/01_common.sblytbnd.dcx")
         ).unwrap() };
 
@@ -342,7 +345,7 @@ mod tests {
             }
         }
 
-        let mut binder = unsafe { lyts.pack().unwrap() };
+        let mut binder = unsafe { lyts.pack_binder().unwrap() };
         unsafe {
         binder.to_file(
             Path::new(r"C:/Users/lstr/Downloads/test.sblytbnd.dcx"),

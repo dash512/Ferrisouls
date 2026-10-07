@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use std::io::Cursor;
 
 use encoding_rs::SHIFT_JIS;
+use zerocopy::IntoBytes;
 
 use crate::errors::BinaryReaderError;
 
@@ -63,7 +64,7 @@ impl_readable! {
 
 //region BinaryReader
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinaryReader<'a> {
     pub data: Cursor<&'a [u8]>,
     pub big_endian: bool,
@@ -166,7 +167,7 @@ impl<'a> BinaryReader<'a> {
     pub fn with_position<R>(
         &mut self,
         offset: u64,
-        f: impl FnOnce(&mut Self) -> Result<R>,
+        f: impl FnOnce(&mut Self) -> Result<R>
     ) -> Result<R> {
         let old_position = self.position();
 
@@ -295,6 +296,11 @@ impl<'a> BinaryReader<'a> {
         self.with_position(position, |r| r.read())
     }
 
+    /// Reads a `T` at  `offset` without advancing the position.
+    pub fn get<T: Readable>(&mut self, offset: u64) -> Result<T> {
+        self.with_position(offset, |r| r.read())
+    }
+
     /// Reads a `T` at `offset`, then returns to the current position.
     pub fn read_value_at<T: Readable>(&mut self, offset: u64) -> Result<T> {
         self.with_position(offset, |r| r.read())
@@ -343,6 +349,26 @@ impl<'a> BinaryReader<'a> {
         }
 
         Ok(found.to_vec())
+    }
+
+    pub fn assert_pattern(&mut self, pattern: u8, length: usize) -> Result<Vec<u8>> {
+        self.assert_bytes(&pattern.as_bytes().repeat(length))
+    }
+
+    ///Asserts that value returned by given closure `f` is in array `values`. Returns which value matched, else error.
+    pub fn matches<R: Readable>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<R>,
+        values: &[R]
+    ) -> Result<R> 
+    where R: PartialEq<R> + Debug + Clone {
+        let read = f(self)?;
+        for v in values {
+            if *v == read {
+                return Ok(v.clone())
+            }
+        }
+        Err(BinaryReaderError::Custom(format!("Match failed! {:?} was not in asserted array: {:?}", read, values)))
     }
 
     //region Integers & floats
@@ -573,6 +599,13 @@ impl<'a> BinaryReader<'a> {
         Self::decode_utf8(self.read_fixed_slice(length)?)
     }
 
+    pub fn get_ascii(&mut self, offset: u64) -> Result<String> {
+        self.step_in(offset)?;
+        let out = self.read_ascii()?;
+        self.step_out()?;
+        Ok(out)
+    }
+
     //region Shift-JIS
 
     pub fn read_shift_jis(&mut self) -> Result<String> {
@@ -581,6 +614,13 @@ impl<'a> BinaryReader<'a> {
 
     pub fn read_shift_jis_fixed(&mut self, length: usize) -> Result<String> {
         Self::decode_shift_jis(self.read_fixed_slice(length)?)
+    }
+
+    pub fn get_shift_jis(&mut self, offset: u64) -> Result<String> {
+        self.step_in(offset)?;
+        let out = self.read_shift_jis()?;
+        self.step_out()?;
+        Ok(out)
     }
 
     //region Length-prefixed strings
@@ -630,5 +670,12 @@ impl<'a> BinaryReader<'a> {
         let end = encoded.iter().position(|&u| u == 0).unwrap_or(encoded.len());
 
         Self::decode_utf16(&encoded[..end])
+    }
+
+    pub fn get_utf16(&mut self, offset: u64) -> Result<String> {
+        self.step_in(offset)?;
+        let out = self.read_utf16()?;
+        self.step_out()?;
+        Ok(out)
     }
 }

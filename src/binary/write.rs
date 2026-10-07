@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use encoding_rs::SHIFT_JIS;
 use md5::{Digest, Md5};
+use zerocopy::IntoBytes;
 
 use crate::errors::BinaryWriterError;
 
@@ -223,6 +224,10 @@ impl BinaryWriter {
         self.position = end;
 
         Ok(())
+    }
+
+    pub fn write_pattern(&mut self, pattern: u8, length: usize) -> Result<()> {
+        self.write_bytes(&pattern.as_bytes().repeat(length))
     }
 
     pub fn write_zeros(&mut self, count: usize) -> Result<()> {
@@ -489,6 +494,12 @@ impl BinaryWriter {
         self.write_zeros(length - bytes.len())
     }
 
+    fn write_and_pad(&mut self, bytes: &[u8], length: usize, pad_with: u8) -> Result<()> {
+        self.write_bytes(bytes)?;
+        let pad = pad_with.as_bytes().repeat(length - bytes.len());
+        self.write_bytes(&pad)
+    }
+
     fn write_null_terminated(&mut self, bytes: &[u8]) -> Result<()> {
         self.write_bytes(bytes)?;
         self.write_u8(0)
@@ -514,9 +525,13 @@ impl BinaryWriter {
 
     //region ASCII / UTF-8
 
-    pub fn write_ascii(&mut self, value: &str) -> Result<()> {
+    pub fn write_ascii(&mut self, value: &str, terminate: bool) -> Result<()> {
         Self::ensure_ascii(value)?;
-        self.write_null_terminated(value.as_bytes())
+        self.write_bytes(value.as_bytes())?;
+        if terminate {
+            self.write_u8(0u8)?;
+        }
+        Ok(())
     }
 
     pub fn write_ascii_fixed(&mut self, value: &str, length: usize) -> Result<()> {
@@ -524,8 +539,12 @@ impl BinaryWriter {
         self.write_padded(value.as_bytes(), length, "ASCII")
     }
 
-    pub fn write_utf8(&mut self, value: &str) -> Result<()> {
-        self.write_null_terminated(value.as_bytes())
+    pub fn write_utf8(&mut self, value: &str, terminate: bool) -> Result<()> {
+        self.write_bytes(value.as_bytes())?;
+        if terminate {
+            self.write_u8(0u8)?;
+        }
+        Ok(())
     }
 
     pub fn write_utf8_fixed(&mut self, value: &str, length: usize) -> Result<()> {
@@ -546,9 +565,9 @@ impl BinaryWriter {
         Ok(())
     }
 
-    pub fn write_shift_jis_fixed(&mut self, value: &str, length: usize) -> Result<()> {
+    pub fn write_shift_jis_fixed(&mut self, value: &str, length: usize, pad_with: u8) -> Result<()> {
         let encoded = Self::encode_shift_jis(value)?;
-        self.write_padded(&encoded, length, "Shift-JIS")
+        self.write_and_pad(&encoded, length, pad_with)
     }
 
     //region Length-prefixed strings
@@ -589,19 +608,19 @@ impl BinaryWriter {
         Ok(())
     }
 
-    /// Writes `value` padded with zero code units up to `units` UTF-16 units.
-    pub fn write_utf16_fixed(&mut self, value: &str, units: usize) -> Result<()> {
+    /// Writes `value` padded with zero code units up to `length` UTF-16 units.
+    pub fn write_utf16_fixed(&mut self, value: &str, length: usize, pad_with: u8) -> Result<()> {
         let encoded: Vec<u16> = value.encode_utf16().collect();
 
-        if encoded.len() > units {
+        if encoded.len() > length {
             return Err(invalid(format!(
-                "UTF-16 string contains {} units, maximum is {units}",
+                "UTF-16 string contains {} units, maximum is {length}",
                 encoded.len()
             )));
         }
 
         self.write_slice(&encoded)?;
-        self.write_zeros((units - encoded.len()) * 2)
+        self.write_pattern(pad_with, (length - encoded.len()) * 2)
     }
 
     //region Write at offset (position is restored afterwards)

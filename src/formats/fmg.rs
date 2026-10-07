@@ -3,6 +3,7 @@ use std::{collections::HashMap, ops::Index, path::Path};
 use bitflags::Flags;
 
 use crate::binary::{BinaryReader, BinaryWriter, IO};
+use crate::binders::{MetaBinder, MetaEntry};
 use crate::binders::bnd4::BND4EntryHeader;
 use crate::binders::{Binder, BinderEntry, BinderFlags, BinderVersion, bnd4::{BND4, BND4Entry, BND4Header}};
 use crate::dcx::DCXType;
@@ -316,28 +317,19 @@ impl IO for FMG {
 
 }
 
-impl FMG {
-    pub fn from_entry(entry: &BND4Entry) -> Result<Self, BinaryReaderError> {
-        let mut fmg = Self::from_bytes(&entry.data)?;
-        fmg.name = entry.name.clone();
-        fmg.header = Some(entry.header.clone());
-        Ok(fmg)
+impl MetaEntry for FMG {
+    fn header(&self) -> Option<BND4EntryHeader> {
+        self.header.clone()
     }
-
-    pub fn to_entry(&mut self) -> Result<BND4Entry, BinaryWriterError> {
-        let mut writer = BinaryWriter::new(true, false);
-        self.to_writer(&mut writer)?;
-
-        let header = self.header.clone()
-            .ok_or_else(|| BinaryWriterError::custom("FMG has no BND4 entry header; cannot repack"))?;
-
-        Ok(BND4Entry {
-            name: self.name.clone(),
-            header,
-            data: writer.into_inner(),
-        })
+    fn name(&self) -> Option<String> {
+        self.name.clone()
     }
-
+    fn set_header(&mut self, header: &BND4EntryHeader) {
+        self.header = Some(header.clone())
+    }
+    fn set_name(&mut self, name: &Option<String>) {
+        self.name = name.clone()
+    }
 }
 
 impl Binder for FMG {
@@ -371,19 +363,6 @@ impl IO for FMGBinder {
             .map_err(|e| BinaryReaderError::Custom(e.to_string()))
     }
 
-    fn from_binder(binder: &mut BND4) -> Result<Self, BinaryReaderError> {
-        let entries: Vec<FMG> = binder.iter_mut()
-            .map(|e| FMG::from_entry(e))
-            .collect::<Result<Vec<_>, _>>()?;
-        
-        Ok(
-            Self { 
-                header: binder.header.clone(), 
-                entries
-            }
-        )
-    }
-    
     fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
         let mut writer = BinaryWriter::default();
 
@@ -393,27 +372,6 @@ impl IO for FMGBinder {
 
         Ok(writer)
     }
-
-    ///Decompresses self as a BND4 from `path`. Also returns detected `DCXType`
-    unsafe fn unpack(path: &Path) -> Result<(Self, DCXType), BinaryReaderError> {
-        let (mut binder, dcxtype) = unsafe { BND4::unpack(path)?};
-        Ok((Self::from_binder(&mut binder)?, dcxtype))
-    }
-
-    ///Packs list of `FMG`s into a new BND4 with a provided header.
-    /// 
-    ///You may then want to call `to_file` on the resulting binder to compress and write.
-    unsafe fn pack(&mut self) -> Result<BND4, BinaryWriterError> {
-        let entries = self.entries.iter_mut()
-            .map(|e| e.to_entry())
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(BND4 {
-            header: self.header.clone(),
-            entries
-        })
-    }
-
 }
 
 impl Binder for FMGBinder {
@@ -422,6 +380,16 @@ impl Binder for FMGBinder {
 
     fn entries(&mut self) -> &mut Vec<Self::Entry> {
         &mut self.entries
+    }
+}
+
+impl MetaBinder for FMGBinder {
+    fn header(&self) -> BND4Header {
+        self.header.clone()
+    }
+
+    fn new(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
+        Self { header, entries }
     }
 }
 
@@ -435,7 +403,7 @@ mod tests {
     fn test_msg() {
         unsafe {init_oodle(Path::new("tests/oo2core_6_win64.dll"));}
 
-        let (mut fmg, dcx_type) = unsafe { FMGBinder::unpack(Path::new("tests/item.msgbnd.dcx")).unwrap() };
+        let (mut fmg, dcx_type) = unsafe { FMGBinder::unpack_binder(Path::new("tests/item.msgbnd.dcx")).unwrap() };
 
         for e in fmg.iter_mut() {
             for f in e.iter_mut() {
@@ -443,7 +411,7 @@ mod tests {
             }
         }
 
-        let mut binder = unsafe { fmg.pack().unwrap() };
+        let mut binder = unsafe { fmg.pack_binder().unwrap() };
         unsafe {
         binder.to_file(
             Path::new(r"C:/Users/lstr/Downloads/test.msgbnd.dcx"),

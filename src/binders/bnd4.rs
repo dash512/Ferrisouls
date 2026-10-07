@@ -159,7 +159,7 @@ impl BND4Header {
 
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BND4EntryHeader {
     pub flags: EntryFlags,
 
