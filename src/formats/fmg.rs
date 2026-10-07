@@ -39,6 +39,8 @@ impl FMGVersion {
     }
 }
 
+
+#[derive(Debug)]
 pub struct FMGEntry {
     pub id: usize,
     pub text: String
@@ -53,7 +55,7 @@ impl BinderEntry for FMGEntry {
 }
 
 
-
+#[derive(Debug)]
 pub struct FMG {
     name: Option<String>, // not serialized, used for convenience
     version: FMGVersion, 
@@ -351,6 +353,7 @@ impl BinderEntry for FMG {
 
 
 
+#[derive(Debug)]
 pub struct FMGBinder {
     header: BND4Header,
     entries: Vec<FMG>
@@ -396,27 +399,34 @@ impl MetaBinder for FMGBinder {
 
 #[cfg(test)]
 mod tests {
-    use crate::{dcx::CompressSettings, oodle::{core::init_oodle, structs::OodleSettings}};
+    use regex::Regex;
+
+use crate::{dcx::CompressSettings, oodle::{core::init_oodle, structs::OodleSettings}};
     use super::*;
 
     #[test]
     fn test_msg() {
         unsafe {init_oodle(Path::new("tests/oo2core_6_win64.dll"));}
 
-        let (mut fmg, dcx_type) = unsafe { FMGBinder::unpack_binder(Path::new("tests/item.msgbnd.dcx")).unwrap() };
+        let (mut fmg, dcx_type) = unsafe { 
+            FMGBinder::unpack_binder(Path::new("tests/item.msgbnd.dcx")).unwrap() 
+        };
 
-        for e in fmg.iter_mut() {
-            for f in e.iter_mut() {
-                f.text = String::from("fish")
-            }
+        let re = Regex::new("(?i)Turtle|Tortoise").unwrap();
+        for file in fmg.iter_mut() {
+            file.execute_regex(
+                &re,
+                |e| &e.text,
+                |e| { e.text = re.replace_all(&e.text, "Dog").to_string() }
+            );
         }
 
         let mut binder = unsafe { fmg.pack_binder().unwrap() };
         unsafe {
-        binder.to_file(
-            Path::new(r"C:/Users/lstr/Downloads/test.msgbnd.dcx"),
-            CompressSettings::Oodle(dcx_type, OodleSettings::KRAK)
-        ).unwrap();
+            binder.to_file(
+                Path::new(r"C:/Users/lstr/Downloads/test.msgbnd.dcx"),
+                CompressSettings::Oodle(dcx_type, OodleSettings::KRAK)
+            ).unwrap();
         }
     }
 }

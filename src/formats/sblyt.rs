@@ -13,8 +13,8 @@ use roxmltree::{Document, Node};
 use xmlwriter::{Indent, Options, XmlWriter};
 
 
-#[derive(Debug)]
 ///Represents a single SubTexture entry in a layout XML
+#[derive(Debug)]
 pub struct Subtexture {
     name: String,
 
@@ -94,7 +94,6 @@ impl Subtexture {
 
 
 
-#[derive(Debug)]
 ///Represents a `.layout` file inside a BND4
 /// 
 ///IMPORTANT:
@@ -103,6 +102,7 @@ impl Subtexture {
 ///This struct's `to_entry` and `from_entry` implement them differently, so `IO` isn't needed.
 /// 
 ///Attempting to call any `IO` functions on this struct will panic with `"not implemented"`.
+#[derive(Debug)]
 pub struct Layout {
     _header: BND4EntryHeader, // used when repacking the layout
 
@@ -251,6 +251,7 @@ impl MetaEntry for Layout {
 
 
 ///Essentially just a BND4, defined here for QoL
+#[derive(Debug)]
 pub struct LayoutBinder {
     header: BND4Header,
     entries: Vec<Layout>

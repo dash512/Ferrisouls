@@ -245,6 +245,10 @@ pub trait Binder {
         self.entries().get(index)
     }
 
+    fn get_mut(&mut self, index: usize) -> Option<&mut <Self as Binder>::Entry> {
+        self.entries().get_mut(index)
+    }
+
     fn add(&mut self, entry: Self::Entry) {
         self.entries().push(entry);
     }
@@ -290,15 +294,25 @@ pub trait Binder {
             )
     }
 
-    ///Find all entries in self that match a given Regex pattern, applying `f` to each.
+    fn find_mut(&mut self, id: <<Self as Binder>::Entry as BinderEntry>::Identifier) -> Option<&mut Self::Entry> {
+        self.entries()
+            .iter_mut()
+            .find(
+                |e|
+                *e.identity() == id
+            )
+    }
+
+    ///Find all entries in self whose `identity` matches a given Regex `pattern`, applying `f` to each.
     /// 
     ///If `Self::Entry::Identifier` is an `Option`, None values will never match.
-    fn execute_regex<F>(&mut self, pattern: Regex, mut f: F) 
-    where 
-        F: FnMut(&mut <Self as Binder>::Entry)
+    fn execute_regex<F, I>(&mut self, pattern: &Regex, identity: I, mut f: F)
+    where
+        I: Fn(&Self::Entry) -> &str,
+        F: FnMut(&mut Self::Entry),
     {
         for entry in self.entries().iter_mut() {
-            if entry.matches(&pattern) {
+            if pattern.is_match(identity(entry)) {
                 f(entry);
             }
         }
