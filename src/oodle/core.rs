@@ -6,6 +6,7 @@ use crate::errors::DCXError;
 use crate::oodle::bindings::*;
 use crate::oodle::structs::*;
 use crate::oodle::enums::*;
+use crate::steam::find_steam_game;
 
 pub trait Oodle {
     type CompressOptions;
@@ -520,7 +521,7 @@ impl OodleType {
         }
     }
 
-    pub unsafe fn get_oodle(path: &Path) -> Result<OodleType, String> {
+    pub unsafe fn get(path: &Path) -> Result<OodleType, String> {
         match path.file_name().and_then(|name| name.to_str()) {
             Some("oo2core_6_win64.dll") => unsafe {
                 Oodle26::load(path)
@@ -545,17 +546,41 @@ impl OodleType {
     }
 
     pub fn find_oodle() -> Result<PathBuf, String> {
-        let paths: [&Path; 1] = [
-            Path::new("../oodle.dll") // TODO
-        ];
+        let try_find = |root: Option<&Path>| -> Option<PathBuf> {
+            let root = root?;
 
-        for p in paths {
-            if p.exists() {
-                return Ok(p.to_owned());
+            for e in [
+                "oo2core_6_win64.dll",
+                "Game/oo2core_6_win64.dll",
+                "Game/oo2core_8_win64.dll",
+                "Game/oo2core_9_win64.dll",
+            ] {
+                let path = root.join(e);
+
+                if path.is_file() {
+                    return Some(path);
+                }
             }
-        }
-        Err("Couldn't find Oodle".to_string())
+            None
+        };
+
+        let cwd = std::env::current_dir().ok();
+
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(Path::to_owned));
+
+        let any_game = find_steam_game(2622380)
+            .or_else(|| find_steam_game(1245620))
+            .or_else(|| find_steam_game(814380))
+            .or_else(|| find_steam_game(1888160));
+
+        try_find(cwd.as_deref())
+            .or_else(|| try_find(exe_dir.as_deref()))
+            .or_else(|| try_find(any_game.as_deref()))
+            .ok_or_else(|| "Couldn't find Oodle".to_string())
     }
+
 }
 
 
@@ -563,7 +588,7 @@ impl OodleType {
 static OODLE: OnceLock<OodleType> = OnceLock::new();
 
 pub unsafe fn init_oodle(path: &Path) -> Result<(), String> {
-    let oodle = unsafe { OodleType::get_oodle(path)? };
+    let oodle = unsafe { OodleType::get(path)? };
 
     OODLE
         .set(oodle)
@@ -584,4 +609,9 @@ pub fn get_oodle() -> Result<&'static OodleType, DCXError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn find_oo2core() {
+        println!("{:?}", OodleType::find_oodle())
+    }
 }
