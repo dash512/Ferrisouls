@@ -16,9 +16,11 @@ pub mod tpf;
 /// 
 ///Therefore, this code rounds all subtexture dimensions so that they are valid. Some of these icons will not look
 /// identical to how they are in game, especially if they are small. If you want them to be cropped correctly,
-/// use `TPFTexture::to_dds::to_bytes` and then pass the bytes to an external image handling library and convert it to a PNG.
+/// handle the raw bytes from `TPFTexture::to_dds::to_bytes` yourself with custom conversion and editing logic.
 /// 
-///Item icons are generally aligned to 4x4 so if you're dumping those (as you're likely to), they should look fine.
+///Alternatively, call `TPFTexture::to_png` and then manipulate the raw bytes in place with a library of your choice.
+/// 
+///Item icons are generally aligned to 4x4 so if you're dumping specifically for those (as you're likely to), they should look fine.
 /// 
 /// ## Safety:
 /// 
