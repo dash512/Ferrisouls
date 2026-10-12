@@ -1,5 +1,210 @@
 use crate::errors::FerrisoulsError::{self, FormatNotFound};
 
+pub mod bc {
+    use std::path::Path;
+    use crate::binary::IO;
+    use crate::errors::{BinaryReaderError, FerrisoulsError};
+    use crate::textures::dds::DDS;
+    use crate::textures::dxgi::DxgiFormat;
+
+    #[derive(Debug, Clone, Copy)]
+    pub enum Bc {
+        Bc1,
+        Bc2,
+        Bc3,
+        Bc4 { signed: bool },
+        Bc5 { signed: bool },
+        Bc6h { signed: bool },
+        Bc7,
+    }
+
+    impl Bc {
+        ///Returns the decoder and the size of one compressed 4x4 block in bytes.
+        pub fn from_format(format: DxgiFormat) -> Option<(Self, usize)> {
+            Some(match format {
+                DxgiFormat::BC1_TYPELESS | DxgiFormat::BC1_UNORM | DxgiFormat::BC1_UNORM_SRGB => (Self::Bc1, 8),
+
+                DxgiFormat::BC2_TYPELESS | DxgiFormat::BC2_UNORM | DxgiFormat::BC2_UNORM_SRGB => (Self::Bc2, 16),
+
+                DxgiFormat::BC3_TYPELESS | DxgiFormat::BC3_UNORM | DxgiFormat::BC3_UNORM_SRGB => (Self::Bc3, 16),
+
+                DxgiFormat::BC4_TYPELESS | DxgiFormat::BC4_UNORM => (Self::Bc4 { signed: false }, 8),
+                DxgiFormat::BC4_SNORM => (Self::Bc4 { signed: true }, 8),
+
+                DxgiFormat::BC5_TYPELESS | DxgiFormat::BC5_UNORM => (Self::Bc5 { signed: false }, 16),
+                DxgiFormat::BC5_SNORM => (Self::Bc5 { signed: true }, 16),
+
+                DxgiFormat::BC6H_TYPELESS | DxgiFormat::BC6H_UF16 => (Self::Bc6h { signed: false }, 16),
+                DxgiFormat::BC6H_SF16 => (Self::Bc6h { signed: true }, 16),
+
+                DxgiFormat::BC7_TYPELESS | DxgiFormat::BC7_UNORM | DxgiFormat::BC7_UNORM_SRGB => (Self::Bc7, 16),
+
+                _ => return None,
+            })
+        }
+
+        ///Decode one compressed block into a 4x4 RGBA8 block (row pitch of 16 bytes).
+        pub fn decode(self, block: &[u8], out: &mut [u8; 64]) {
+            match self {
+                Self::Bc1 => bcdec_rs::bc1(block, out, 4 * 4),
+                Self::Bc2 => bcdec_rs::bc2(block, out, 4 * 4),
+                Self::Bc3 => bcdec_rs::bc3(block, out, 4 * 4),
+                Self::Bc7 => bcdec_rs::bc7(block, out, 4 * 4),
+
+                //single channel, expanded to opaque grayscale
+                Self::Bc4 { signed } => {
+                    let mut r = [0u8; 4 * 4];
+                    bcdec_rs::bc4(block, &mut r, 4, signed);
+
+                    for (i, &value) in r.iter().enumerate() {
+                        let v = if signed { snorm_to_u8(value) } else { value };
+                        out[i * 4..i * 4 + 4].copy_from_slice(&[v, v, v, 255]);
+                    }
+                }
+
+                //two channels, with the third channel rebuilt as the Z of a unit normal
+                Self::Bc5 { signed } => {
+                    let mut rg = [0u8; 4 * 4 * 2];
+                    bcdec_rs::bc5(block, &mut rg, 4 * 2, signed);
+
+                    for i in 0..16 {
+                        let (r, g) = if signed {
+                            (snorm_to_u8(rg[i * 2]), snorm_to_u8(rg[i * 2 + 1]))
+                        } else {
+                            (rg[i * 2], rg[i * 2 + 1])
+                        };
+                        out[i * 4..i * 4 + 4].copy_from_slice(&[r, g, normal_z(r, g), 255]);
+                    }
+                }
+
+                //HDR, clamped to 0..1 and encoded as sRGB
+                Self::Bc6h { signed } => {
+                    let mut rgb = [0f32; 4 * 4 * 3];
+                    bcdec_rs::bc6h_float(block, &mut rgb, 4 * 3, signed);
+
+                    for i in 0..16 {
+                        out[i * 4..i * 4 + 4].copy_from_slice(&[
+                            hdr_to_u8(rgb[i * 3]),
+                            hdr_to_u8(rgb[i * 3 + 1]),
+                            hdr_to_u8(rgb[i * 3 + 2]),
+                            255,
+                        ]);
+                    }
+                }
+            }
+        }
+    }
+
+    ///Maps a signed byte (-127..=127, as written by bcdec_rs) to 1..=255.
+    pub fn snorm_to_u8(value: u8) -> u8 {
+        (value as i8 as i16 + 128).clamp(0, 255) as u8
+    }
+
+    pub fn normal_z(r: u8, g: u8) -> u8 {
+        let x = r as f32 / 255.0 * 2.0 - 1.0;
+        let y = g as f32 / 255.0 * 2.0 - 1.0;
+        let z = (1.0 - x * x - y * y).max(0.0).sqrt();
+        ((z * 0.5 + 0.5) * 255.0 + 0.5) as u8
+    }
+
+    ///Clamp a linear HDR value to 0..1 and encode it as sRGB.
+    pub fn hdr_to_u8(value: f32) -> u8 {
+        let v = value.clamp(0.0, 1.0);
+        let encoded = if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+        (encoded * 255.0 + 0.5) as u8
+    }
+
+    pub fn linear_to_u8(value: f32) -> u8 {
+        (value.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+    }
+
+    pub fn half_to_f32(half: u16) -> f32 {
+        let sign = ((half >> 15) & 1) as u32;
+        let exponent = ((half >> 10) & 0x1F) as u32;
+        let fraction = (half & 0x3FF) as u32;
+
+        let bits = if exponent == 0 {
+            if fraction == 0 {
+                sign << 31
+            } else {
+                //subnormal half; renormalize
+                let mut exponent = 127 - 15 + 1;
+                let mut fraction = fraction;
+                while fraction & 0x400 == 0 {
+                    fraction <<= 1;
+                    exponent -= 1;
+                }
+                (sign << 31) | (exponent << 23) | ((fraction & 0x3FF) << 13)
+            }
+        } else if exponent == 0x1F {
+            (sign << 31) | 0x7F80_0000 | (fraction << 13)
+        } else {
+            (sign << 31) | ((exponent + 127 - 15) << 23) | (fraction << 13)
+        };
+
+        f32::from_bits(bits)
+    }
+
+    pub fn expand5(value: u16) -> u8 {
+        ((value << 3) | (value >> 2)) as u8
+    }
+
+    pub fn expand6(value: u16) -> u8 {
+        ((value << 2) | (value >> 4)) as u8
+    }
+
+    ///Bytes per pixel for the needed uncompressed formats
+    pub fn uncompressed_bpp(format: DxgiFormat) -> Option<usize> {
+        match format {
+            DxgiFormat::R8_UNORM | DxgiFormat::A8_UNORM => Some(1),
+            DxgiFormat::B5G6R5_UNORM | DxgiFormat::B5G5R5A1_UNORM => Some(2),
+            DxgiFormat::R8G8B8A8_UNORM | DxgiFormat::R8G8B8A8_UNORM_SRGB
+            | DxgiFormat::B8G8R8A8_UNORM | DxgiFormat::B8G8R8A8_UNORM_SRGB
+            | DxgiFormat::B8G8R8X8_UNORM | DxgiFormat::B8G8R8X8_UNORM_SRGB => Some(4),
+            DxgiFormat::R16G16B16A16_UNORM | DxgiFormat::R16G16B16A16_FLOAT => Some(8),
+            _ => None,
+        }
+    }
+
+    ///Convert one uncompressed pixel to RGBA8. `pixel` must hold `uncompressed_bytes_per_pixel(format)` bytes.
+    pub fn expand_pixel(format: DxgiFormat, pixel: &[u8]) -> [u8; 4] {
+        match format {
+            //single channel formats are shown as opaque grayscale
+            DxgiFormat::R8_UNORM | DxgiFormat::A8_UNORM => [pixel[0], pixel[0], pixel[0], 255],
+
+            DxgiFormat::B5G6R5_UNORM => {
+                let v = u16::from_le_bytes([pixel[0], pixel[1]]);
+                [expand5((v >> 11) & 0x1F), expand6((v >> 5) & 0x3F), expand5(v & 0x1F), 255]
+            }
+            DxgiFormat::B5G5R5A1_UNORM => {
+                let v = u16::from_le_bytes([pixel[0], pixel[1]]);
+                [
+                    expand5((v >> 10) & 0x1F),
+                    expand5((v >> 5) & 0x1F),
+                    expand5(v & 0x1F),
+                    if v & 0x8000 != 0 { 255 } else { 0 },
+                ]
+            }
+
+            DxgiFormat::R8G8B8A8_UNORM | DxgiFormat::R8G8B8A8_UNORM_SRGB => [pixel[0], pixel[1], pixel[2], pixel[3]],
+            DxgiFormat::B8G8R8A8_UNORM | DxgiFormat::B8G8R8A8_UNORM_SRGB => [pixel[2], pixel[1], pixel[0], pixel[3]],
+            DxgiFormat::B8G8R8X8_UNORM | DxgiFormat::B8G8R8X8_UNORM_SRGB => [pixel[2], pixel[1], pixel[0], 255],
+
+            //little endian u16 channels, so the high byte is the second one
+            DxgiFormat::R16G16B16A16_UNORM => [pixel[1], pixel[3], pixel[5], pixel[7]],
+            DxgiFormat::R16G16B16A16_FLOAT => {
+                let channel = |i: usize| half_to_f32(u16::from_le_bytes([pixel[i * 2], pixel[i * 2 + 1]]));
+                [hdr_to_u8(channel(0)), hdr_to_u8(channel(1)), hdr_to_u8(channel(2)), linear_to_u8(channel(3))]
+            }
+
+            _ => [0, 0, 0, 255],
+        }
+    }
+
+}
+
+
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FormatInfo {
     Linear {
@@ -39,12 +244,24 @@ impl FormatInfo {
             Self::Planar => Err("Planar types require specific implementation.")
         }
     }
+
+    pub fn block_dimensions(&self) -> (u8, u8) {
+        match self {
+            Self::BlockCompressed {
+                block_width,
+                block_height,
+                ..
+            } => (*block_width, *block_height),
+
+            _ => (1, 1),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DxgiFormat {
     name: &'static str,
-    value: u32, // dxgi ID as per microsoft
+    value: u8, // dxgi ID as per microsoft
     description: &'static str,
     info: FormatInfo
 }
@@ -1391,7 +1608,7 @@ impl DxgiFormat {
         self.name
     }
 
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> u8 {
         self.value
     }
 
@@ -1403,7 +1620,7 @@ impl DxgiFormat {
         self.description
     }
 
-    pub fn from_id(id: u32) -> Result<DxgiFormat, FerrisoulsError> {
+    pub fn from_id(id: u8) -> Result<DxgiFormat, FerrisoulsError> {
         for format in Self::DXGI_FORMATS.iter() {
             if id == format.id() {
                 return Ok(format.clone());
@@ -1421,24 +1638,93 @@ impl DxgiFormat {
         Err(FormatNotFound)
     }
 
+    //TPFTexture stuff
+
     /// Get dxgi format from internal enum value found in TPFTexture object
-    pub fn from_tpftexture_id(id: u8) -> Result<DxgiFormat, FerrisoulsError> {
+    pub fn from_internal(id: u8) -> DxgiFormat {
         match id {
-            0 | 1 | 25 | 29 | 108 | 109 => Ok(Self::BC1_UNORM),
-            3 => Ok(Self::BC2_UNORM),
-            5 | 23 | 33 | 110 => Ok(Self::BC3_UNORM),
-            6 => Ok(Self::B5G5R5A1_UNORM),
-            8 | 10 | 105 => Ok(Self::R8G8B8A8_UNORM),
-            9 => Ok(Self::B8G8R8A8_UNORM),
-            16 => Ok(Self::A8_UNORM),
-            22 => Ok(Self::R16G16B16A16_UNORM),
-            24 | 103 => Ok(Self::BC4_UNORM),
-            100 | 113 | 115 => Ok(Self::BC6H_UF16),
-            102 | 106 | 107 => Ok(Self::BC7_UNORM),
-            104 => Ok(Self::BC5_UNORM),
-            112 => Ok(Self::BC7_UNORM_SRGB),
-            _=> Err(FormatNotFound)
+            0 | 1 | 25 | 29 | 108 | 109 => Self::BC1_UNORM,
+            3 => Self::BC2_UNORM,
+            5 | 23 | 33 | 110 => Self::BC3_UNORM,
+            6 => Self::B5G5R5A1_UNORM,
+            8 | 10 | 105 => Self::R8G8B8A8_UNORM,
+            9 => Self::B8G8R8A8_UNORM,
+            16 | 26 => Self::A8_UNORM,
+            22 => Self::R16G16B16A16_UNORM,
+            24 | 103 => Self::BC4_UNORM,
+            100 | 113 | 115 => Self::BC6H_UF16,
+            102 | 106 | 107 => Self::BC7_UNORM,
+            36 | 104 => Self::BC5_UNORM,
+            112 => Self::BC7_UNORM_SRGB,
+            _=> Self::UNKNOWN
         }
+    }
+
+    /// Get internal enum value used by fromsoft for TPFs
+    pub fn to_internal(&self) -> Result<u8, FerrisoulsError> {
+        match *self {
+            Self::BC1_UNORM => Ok(0),
+            Self::BC2_UNORM => Ok(3),
+            Self::BC3_UNORM => Ok(5),
+            Self::B5G5R5A1_UNORM => Ok(6),
+            Self::R8G8B8A8_UNORM => Ok(8),
+            Self::B8G8R8A8_UNORM => Ok(9),
+            Self::A8_UNORM => Ok(16),
+            Self::R16G16B16A16_UNORM => Ok(22),
+            Self::BC4_UNORM => Ok(24),
+            Self::BC5_UNORM => Ok(104),
+            Self::BC6H_UF16 => Ok(100),
+            Self::BC7_UNORM => Ok(102),
+            Self::BC7_UNORM_SRGB => Ok(112),
+            _ => Err(FormatNotFound),
+        }
+    }
+
+    /// Get four-cc from internal enum value.
+    pub fn fourcc(id: u8) -> Option<&'static str> {
+        Some(match id {
+            0 | 1 | 25 | 29 | 108 | 109 => "DXT1",
+            3 => "DXT3",
+            5 | 23 | 33 | 110 => "DXT5",
+            22 => "q\0\0\0", // 0x71
+            24 | 103 => "ATI1",
+            104 => "ATI2",
+            _ => return None,
+        })
+    }
+
+    /// Returns true if given format needs a DX10 header
+    pub fn needs_dx10(id: u8) -> bool {
+        matches!(
+            id,
+            29 | 65 | 72 | 75 | 78 | 86 | 91 | 93 | 94 | 95 | 96 | 97 | 98 | 99
+        )
+    }
+
+    ///Returns self bits per block. This info is available in `self.info()` but it can be useful to check quickly.
+    pub fn compressed_bpb(id: u8) -> Option<u8> {
+        match id {
+            0 | 1 | 24 | 25 | 29 | 103 | 108 | 109 => Some(8),
+            3 | 5 | 23 | 33 | 36 | 100 | 102 | 103 | 104 | 106 | 107 | 110 | 112 | 113 | 115 => Some(16),
+            _=> None
+        }   
+    }
+
+    ///Returns self bytes per pixel. This info is available in `self.info()` but it can be useful to check quickly.
+    pub fn uncompressed_bpp(id: u8) -> Option<u8> {
+        match id {
+            16 | 26 => Some(1),
+            6 => Some(2),
+            22 => Some(8),
+            8 | 9 | 10 | 105 => Some(4),
+            _=> None
+        }
+    }
+}
+
+impl Default for DxgiFormat {
+    fn default() -> Self {
+        Self::UNKNOWN
     }
 }
 
@@ -1456,10 +1742,21 @@ mod tests {
 
     #[test]
     fn test_from_tpftexture_and_properties() -> Result<(), FerrisoulsError> {
-        let format = DxgiFormat::from_tpftexture_id(106)?;
+        let format = DxgiFormat::from_internal(106);
         assert_eq!(format.id(), 98);
         assert_eq!(format.name(), "BC7_UNORM");
         assert_eq!(format.info(), FormatInfo::BlockCompressed { bits_per_texel: 8, bytes_per_block: 16, block_width: 4, block_height: 4 });
         return Ok(());
+    }
+
+    #[test]
+    fn e() {
+        for i in 0..120 {
+            let r = DxgiFormat::from_internal(i);
+            match r {
+                DxgiFormat::UNKNOWN => {continue;},
+                d  => println!("{} => {}", i, d.id()),
+            }
+        }
     }
 }

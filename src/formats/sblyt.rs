@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::Path;
 use std::fmt::Write;
 
@@ -16,17 +17,17 @@ use xmlwriter::{Indent, Options, XmlWriter};
 ///Represents a single SubTexture entry in a layout XML
 #[derive(Debug)]
 pub struct Subtexture {
-    name: String,
+    pub name: String,
 
-    x: u16,
-    y: u16,
-    width: u16,
-    height: u16,
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
 
-    original_width: Option<u16>,
-    original_height: Option<u16>,
+    pub original_width: Option<u16>,
+    pub original_height: Option<u16>,
 
-    flag_half: bool, //repr 0/1
+    pub flag_half: bool, //repr 0/1
 }
 
 impl BinderEntry for Subtexture {
@@ -90,6 +91,18 @@ impl Subtexture {
         w.write_attribute("half", &(self.flag_half as u8));
         w.end_element();
     }
+
+    ///Returns a new `Subtexture` whose attributes are all divisible by `n`
+    pub fn round_to(&self, n: u16) -> Self {
+        Self {
+            name: self.name.clone(),
+            x: (self.x / n) * n,
+            y: (self.y / n) * n,
+            width: (self.width / n) * n,
+            height: (self.height / n) * n,
+            ..*self
+        }
+    }
 }
 
 
@@ -104,16 +117,16 @@ impl Subtexture {
 ///Attempting to call any `IO` functions on this struct will panic with `"not implemented"`.
 #[derive(Debug)]
 pub struct Layout {
-    _header: BND4EntryHeader, // used when repacking the layout
+    pub _header: BND4EntryHeader, // used when repacking the layout
 
-    name: Option<String>,
-    image_path: String,
+    pub name: String,
+    pub image_path: String,
 
-    width: Option<u16>,
-    height: Option<u16>,
-    root_dimensions: bool, // whether to write atlas dimensions to the TextureAtlas xml root; used in NR
+    pub width: Option<u16>,
+    pub height: Option<u16>,
+    pub root_dimensions: bool, // whether to write atlas dimensions to the TextureAtlas xml root; used in NR
 
-    entries: Vec<Subtexture>
+    pub entries: Vec<Subtexture>
 }
 
 impl Binder for Layout {
@@ -129,12 +142,21 @@ impl BinderEntry for Layout {
     type Identifier = String;
 
     fn identity(&self) -> &Self::Identifier {
-        &self.image_path
+        &self.name
     }
 }
 
 impl Layout {
-    fn from_bytes(name: Option<String>, header: BND4EntryHeader, data: &[u8]) -> Result<Self, BinaryReaderError> {
+    pub fn stem(&self) -> String {
+        Path::new(&self.name)
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    pub fn from_bytes(name: Option<String>, header: BND4EntryHeader, data: &[u8]) -> Result<Self, BinaryReaderError> {
         let raw_xml = str::from_utf8(data)
             .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
 
@@ -168,7 +190,7 @@ impl Layout {
 
                 Ok(Self {
                     _header: header,
-                    name,
+                    name: name.unwrap(),
                     image_path,
                     width,
                     height,
@@ -179,7 +201,7 @@ impl Layout {
             None => {
                 Ok(Self {
                     _header: header,
-                    name,
+                    name: name.unwrap(),
                     image_path,
                     width: None,
                     height: None,
@@ -190,6 +212,7 @@ impl Layout {
         }
 
     }
+
 }
 
 impl IO for Layout {} // NOT IMPLEMENTED! Only used for MetaEntry
@@ -200,7 +223,7 @@ impl MetaEntry for Layout {
     }
 
     fn name(&self) -> Option<String> {
-        self.name.clone()
+        Some(self.name.clone())
     }
 
     fn set_header(&mut self, header: &BND4EntryHeader) {
@@ -208,7 +231,7 @@ impl MetaEntry for Layout {
     }
 
     fn set_name(&mut self, name: &Option<String>) {
-        self.name = name.clone()
+        self.name = name.clone().unwrap()
     }
 
     fn from_entry(entry: &mut BND4Entry) -> Result<Self, BinaryReaderError> {
@@ -242,19 +265,29 @@ impl MetaEntry for Layout {
 
         Ok(BND4Entry {
             header: self._header.clone(),
-            name: self.name.clone(),
+            name: Some(self.name.clone()),
             data: xml.into_bytes(),
         })
     }
 
 }
 
+impl std::fmt::Display for Layout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+
+        write!(f, "Layout[Name: {:?} | Path: {} | Dimensions: {:?}x{:?} | Entries: {}]\n",
+            self.name, self.image_path, self.width, self.height, self.entries.len()
+        )
+    }
+}
+
+
 
 ///Essentially just a BND4, defined here for QoL
 #[derive(Debug)]
 pub struct LayoutBinder {
-    header: BND4Header,
-    entries: Vec<Layout>
+    pub header: BND4Header,
+    pub entries: Vec<Layout>
 }
 
 impl Binder for LayoutBinder {
@@ -289,10 +322,23 @@ impl MetaBinder for LayoutBinder {
         self.header.clone()
     }
 
-    fn new(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
+    fn from_bnd4(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
         Self { header, entries }
     }
 }
+
+impl std::fmt::Display for LayoutBinder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LayoutBinder {{\n");
+        for l in self.entries.iter() {
+            write!(f, "    ");
+            l.fmt(f);
+        }
+        write!(f, "}}")
+    }
+}
+
+
 
 fn parse_attr<T>(node: roxmltree::Node, name: &str) -> Result<T, BinaryReaderError>
 where

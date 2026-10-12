@@ -480,7 +480,7 @@ impl MetaBinder for ParamBND {
         self.header.clone()
     }
 
-    fn new(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
+    fn from_bnd4(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
         Self { header, entries }
     }
 }

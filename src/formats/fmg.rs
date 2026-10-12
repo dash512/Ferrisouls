@@ -351,6 +351,16 @@ impl BinderEntry for FMG {
     }
 }
 
+impl std::fmt::Display for FMG {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+
+        write!(f, "FMG[Name: {:?} | Version: {:?} | Big Endian: {} | Unicode: {} | Entries: {}]\n",
+            self.name, self.version, self.big_endian, self.unicode, self.entries.len()
+        )
+    }
+}
+
+
 
 
 #[derive(Debug)]
@@ -391,10 +401,22 @@ impl MetaBinder for FMGBinder {
         self.header.clone()
     }
 
-    fn new(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
+    fn from_bnd4(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
         Self { header, entries }
     }
 }
+
+impl std::fmt::Display for FMGBinder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FMGBinder {{\n");
+        for l in self.entries.iter() {
+            write!(f, "    ");
+            l.fmt(f);
+        }
+        write!(f, "}}")
+    }
+}
+
 
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ fn invalid(msg: impl Into<String>) -> BinaryReaderError {
 
 fn assertion_failed(found: &dyn Debug, expected: &dyn Debug, loc: u64) -> BinaryReaderError {
     BinaryReaderError::Custom(format!(
-        "Asserted value was incorrect! Got: `{found:?}` | Expected: `{expected:?}` | At: {loc:?}"
+        "Asserted value was incorrect! Got: `{found:?}` | Expected: `{expected:?}` | At: `{loc:?}`"
     ))
 }
 
@@ -219,6 +219,12 @@ impl<'a> BinaryReader<'a> {
         Ok(())
     }
 
+    //region Ouput
+
+    pub fn into_inner(&self) -> Vec<u8> {
+        self.data.clone().into_inner().to_vec()
+    }
+
     //region Raw input
 
     /// Borrows the next `count` bytes straight from the underlying data (no copy).
@@ -248,6 +254,10 @@ impl<'a> BinaryReader<'a> {
 
     pub fn read_bytes(&mut self, count: usize) -> Result<Vec<u8>> {
         self.read_slice(count).map(<[u8]>::to_vec)
+    }
+
+    pub fn read_to_end(&mut self) -> Vec<u8> {
+        self.into_inner()[self.position() as usize..].to_vec()
     }
 
     pub fn read_bytes_into(&mut self, bytes: &mut [u8]) -> Result<()> {
@@ -281,6 +291,20 @@ impl<'a> BinaryReader<'a> {
 
     //region Generic reading
 
+    pub fn multi<T: Readable>(
+        &mut self,
+        f: impl Fn(&mut Self) -> Result<T>,
+        count: u64
+    ) -> Result<Vec<T>> {
+        let mut read = Vec::<T>::new();
+
+        for _ in 0..count {
+            read.push(f(self)?)
+        }
+
+        Ok(read)
+    }
+
     #[inline]
     pub fn read<T: Readable>(&mut self) -> Result<T> {
         T::read_from(self)
@@ -309,6 +333,10 @@ impl<'a> BinaryReader<'a> {
     pub fn peek_bytes(&mut self, count: usize) -> Result<Vec<u8>> {
         let position = self.position();
         self.with_position(position, |r| r.read_bytes(count))
+    }
+
+    pub fn get_bytes(&mut self, offset: u64, count: usize) -> Result<Vec<u8>> {
+        self.with_position(offset, |r| r.read_bytes(count))
     }
 
     pub fn read_at(&mut self, offset: u64, length: usize) -> Result<Vec<u8>> {
@@ -368,7 +396,7 @@ impl<'a> BinaryReader<'a> {
                 return Ok(v.clone())
             }
         }
-        Err(BinaryReaderError::Custom(format!("Match failed! {:?} was not in asserted array: {:?}", read, values)))
+        Err(BinaryReaderError::Custom(format!("Match failed! `{:?}` was not in asserted array: `{:?}`", read, values)))
     }
 
     //region Integers & floats

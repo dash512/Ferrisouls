@@ -368,7 +368,7 @@ pub trait BinderEntry {
 /// 
 ///This trait allows for converting between an intermediate representation for "special" binders.
 pub trait MetaBinder: IO + Binder {
-    fn new(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self;
+    fn from_bnd4(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self;
     fn header(&self) -> BND4Header;
     
     ///Decompresses self as a BND4 from `path`. Also returns detected `DCXType`
@@ -382,7 +382,7 @@ pub trait MetaBinder: IO + Binder {
             .map(|e| Self::Entry::from_entry(e))
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok((Self::new(binder.header.clone(), entries), dcxtype))
+        Ok((Self::from_bnd4(binder.header.clone(), entries), dcxtype))
     }
 
     ///Packs list of `Self` into a new BND4 with a provided header.

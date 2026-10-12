@@ -1,131 +1,189 @@
+use std::fs::File;
+use std::path::Path;
 use std::{io, error::Error, ops::BitOrAssign};
-use std::io::{Read, Error as IOError, ErrorKind};
-use other_enums::*;
+use std::io::{Error as IOError, ErrorKind, Read, Write};
+use bitflags::bitflags;
+pub use other_enums::*;
+use crate::binary::{BinaryReader, BinaryWriter, IO};
 use crate::textures::dxgi::{self, DxgiFormat};
 use crate::dcx::DCXType;
-use crate::errors::DCXError;
+use crate::errors::{BinaryReaderError, BinaryWriterError, DCXError, FerrisoulsError};
+use crate::textures::swizzling::FormatLayout;
 
 mod other_enums {
-    pub enum DDSD {
-        CAPS = 0x1, // always required
-        HEIGHT = 0x2, // always required
-        WIDTH = 0x4, // always required
-        PITCH = 0x8, // required when pitch is provided for an uncompressed texture
-        PIXELFORMAT = 0x1000, // always required
-        MIPMAPCOUNT = 0x20000, // required in a mipmapped texture
-        LINEARSIZE = 0x80000, // required when pitch is provided for a compressed texture
-        DEPTH = 0x800000 // required in a depth texture
+    use super::*;
+
+    bitflags! {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct DDSD: u32 {
+            const CAPS = 0x1; // always required
+            const HEIGHT = 0x2; // always required
+            const WIDTH = 0x4; // always required
+            const PITCH = 0x8; // required when pitch is provided for an uncompressed texture
+            const PIXELFORMAT = 0x1000; // always required
+            const MIPMAPCOUNT = 0x20000; // required in a mipmapped texture
+            const LINEARSIZE = 0x80000; // required when pitch is provided for a compressed texture
+            const DEPTH = 0x800000; // required in a depth texture
+        }
+        
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct DDSCAPS: u32 {
+            const COMPLEX = 0x8;
+            const TEXTURE = 0x1000;
+            const MIPMAP = 0x400000;
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct  DDSCAPS2: u32 {
+            const Cubemap = 0x200;
+            const CubemapPositiveX = 0x400;
+            const CubemapNegativeX = 0x800;
+            const CubemapPositiveY = 0x1000;
+            const CubemapNegativeY = 0x2000;
+            const CubemapPositiveZ = 0x4000;
+            const CubemapNegativeZ = 0x8000;
+            const Volume = 0x200000;
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct DDSPF: u32 {
+            const ALPHAPIXELS = 0x1;
+            const ALPHA = 0x2;
+            const FOURCC = 0x4;
+            const RGB = 0x40;
+            const YUV = 0x200;
+            const LUMINANCE = 0x20000;
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct ResourceMisc: u32 {
+            const TEXTURECUBE = 0x4;
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct D3D10ResourceDimension: u32 {
+            const TEXTURE1D = 2;
+            const TEXTURE2D = 3;
+            const TEXTURE3D = 4;
+        }
+
+        /// Fills a formerly-reserved `miscFlags2` field in `DX10Header`.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct AlphaMode: u32 {
+            const UNKNOWN = 0;
+            const STRAIGHT = 1;
+            const PREMULTIPLIED = 2;
+            const OPAQUE = 3;
+            const CUSTOM = 4;
+        }
+
+
     }
+
 
     impl DDSD {
-        pub fn int(self) -> u32 {
-            self as u32
-        }
-
         /// Starting value for all flags.
-        pub fn get_required_flags() -> u32 {
-            Self::CAPS.int() | Self::HEIGHT.int() | Self::WIDTH.int() | Self::PIXELFORMAT.int()
+        pub fn get_required_flags() -> Self {
+            Self::CAPS | Self::HEIGHT | Self::WIDTH | Self::PIXELFORMAT | Self::MIPMAPCOUNT
         }
     }
 
-    pub enum DDSCAPS {
-        COMPLEX = 0x8,
-        TEXTURE = 0x1000,
-        MIPMAP = 0x400000
-    }
-
-    pub enum  DDSCAPS2 {
-        Cubemap = 0x200,
-        CubemapPositiveX = 0x400,
-        CubemapNegativeX = 0x800,
-        CubemapPositiveY = 0x1000,
-        CubemapNegativeY = 0x2000,
-        CubemapPositiveZ = 0x4000,
-        CubemapNegativeZ = 0x8000,
-        Volume = 0x200000
+    impl Default for DDSD {
+        fn default() -> Self {
+            Self::get_required_flags()
+        }
     }
 
     impl DDSCAPS2 {
-        pub fn int(self) -> u32 {
-            self as u32
-        }
-
-        pub fn get_all_cubemap_faces() -> u32 {
-            Self::Cubemap.int() | Self::CubemapPositiveX.int() | Self::CubemapNegativeX.int() | Self::CubemapPositiveY.int()
-            | Self::CubemapNegativeY.int() | Self::CubemapPositiveZ.int() | Self::CubemapNegativeZ.int()
+        pub fn get_all_cubemap_faces() -> Self {
+            Self::Cubemap | Self::CubemapPositiveX | Self::CubemapNegativeX | Self::CubemapPositiveY
+            | Self::CubemapNegativeY | Self::CubemapPositiveZ | Self::CubemapNegativeZ
         }
     }
 
-    pub enum DDPF {
-        ALPHAPIXELS = 0x1,
-        ALPHA = 0x2,
-        FOURCC = 0x4,
-        RGB = 0x40,
-        YUV = 0x200,
-        LUMINANCE = 0x20000
-    }
-
-    impl DDPF {
-        pub fn int(self) -> u32 {
-            self as u32
+    impl Default for DDSCAPS {
+        fn default() -> Self {
+            Self::TEXTURE
         }
     }
 
-    pub enum D3D10ResourceDimension {
-        TEXTURE1D = 2,
-        TEXTURE2D = 3,
-        TEXTURE3D = 4
+    impl Default for DDSCAPS2 {
+        fn default() -> Self {
+            Self::empty()
+        }
     }
 
-    pub enum ResourceMisc {
-        TEXTURECUBE = 0x4
+    impl Default for DDSPF {
+        fn default() -> Self {
+            Self::empty()
+        }
     }
 
-    /// Fills a formerly-reserved `miscFlags2` field in `DX10Header`.
-    pub enum AlphaMode {
-        UNKNOWN = 0,
-        STRAIGHT = 1,
-        PREMULTIPLIED = 2,
-        OPAQUE = 3,
-        CUSTOM = 4
+    impl Default for D3D10ResourceDimension {
+        fn default() -> Self {
+            Self::TEXTURE2D
+        }
     }
 
+    impl Default for ResourceMisc {
+        fn default() -> Self {
+            Self::TEXTURECUBE
+        }
+    }
+
+    impl Default for AlphaMode {
+        fn default() -> Self {
+            Self::PREMULTIPLIED
+        }
+    }
 
 }
 
 
+#[derive(Debug, Clone)]
 pub struct DDSPixelFormat {
-    size: u32, // asserted: 32
-    flags: u32, // `DDPF` bit flags
+    size: i32, // asserted: 32
+    pub flags: DDSPF, // u32
     pub fourcc: [u8; 4], // default=b"\0\0\0\0"
-    rgb_bit_count: u32,
-    r_bitmask: u32,
-    g_bitmask: u32,
-    b_bitmask: u32,
-    a_bitmask: u32
+    pub rgb_bit_count: i32,
+    pub r_bitmask: u32,
+    pub g_bitmask: u32,
+    pub b_bitmask: u32,
+    pub a_bitmask: u32
+}
+
+impl Default for DDSPixelFormat {
+    fn default() -> Self {
+        Self {
+            size: 32i32, 
+            fourcc: *b"\0\0\0\0", 
+            flags: DDSPF::default(),
+            rgb_bit_count: 0, 
+            r_bitmask: 0, 
+            g_bitmask: 0, 
+            b_bitmask: 0, 
+            a_bitmask: 0
+        }
+    }
 }
 
 impl DDSPixelFormat {
+    ///TODO: fix this.
     pub fn from_fourcc_tpf_format(fourcc: [u8; 4], tpf_format: u8) -> Result<Self, &'static str> {
         let mut pixelformat: DDSPixelFormat = Self {
             size: 32,
-            flags: 0,
             fourcc: fourcc,
-            rgb_bit_count: 0u32,
-            r_bitmask: 0u32,
-            g_bitmask: 0u32,
-            b_bitmask: 0u32,
-            a_bitmask: 0u32
+            ..Default::default()
         };
 
         if fourcc != [b'\0'; 4] {
-            pixelformat.flags |= (DDPF::FOURCC.int());
+            pixelformat.flags |= DDSPF::FOURCC;
             pixelformat.fourcc = fourcc;
         }
 
         match tpf_format {
             6 => {
-                pixelformat.flags |= DDPF::ALPHAPIXELS.int() | DDPF::RGB.int();
+                pixelformat.flags |= DDSPF::ALPHAPIXELS | DDSPF::RGB;
                 pixelformat.rgb_bit_count = 16;
                 pixelformat.r_bitmask = 0b01111100_00000000;
                 pixelformat.g_bitmask = 0b00000011_11100000;
@@ -133,7 +191,7 @@ impl DDSPixelFormat {
                 pixelformat.a_bitmask = 0b10000000_00000000;
             },
             9 => {
-                pixelformat.flags |= DDPF::ALPHAPIXELS.int() | DDPF::RGB.int();
+                pixelformat.flags |= DDSPF::ALPHAPIXELS | DDSPF::RGB;
                 pixelformat.rgb_bit_count = 32;
                 pixelformat.r_bitmask = 0x00FF0000;
                 pixelformat.g_bitmask = 0x0000FF00;
@@ -141,19 +199,19 @@ impl DDSPixelFormat {
                 pixelformat.a_bitmask = 0xFF000000;
             },
             10 => {
-                pixelformat.flags |= DDPF::RGB.int();
+                pixelformat.flags |= DDSPF::RGB;
                 pixelformat.rgb_bit_count = 32;
                 pixelformat.r_bitmask = 0x00FF0000;
                 pixelformat.g_bitmask = 0x0000FF00;
                 pixelformat.b_bitmask = 0x000000FF;
             },
             16 => {
-                pixelformat.flags |= DDPF::ALPHAPIXELS.int();
+                pixelformat.flags |= DDSPF::ALPHAPIXELS;
                 pixelformat.rgb_bit_count = 8;
                 pixelformat.a_bitmask = 0x000000FF;
             },
             105 => {
-                pixelformat.flags |= DDPF::ALPHAPIXELS.int() | DDPF::RGB.int();
+                pixelformat.flags |= DDSPF::ALPHAPIXELS | DDSPF::RGB;
                 pixelformat.rgb_bit_count = 32;
                 pixelformat.r_bitmask = 0x000000FF;
                 pixelformat.g_bitmask = 0x0000FF00;
@@ -167,31 +225,175 @@ impl DDSPixelFormat {
 
 }
 
+impl IO for DDSPixelFormat {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> where Self: Sized {
+        reader.matches(|r| r.read_i32_le(), &[32])?; //size
+        let flags = DDSPF::from_bits_retain(reader.read_u32_le()?);
 
+        let fourcc: [u8; 4] = reader.read_ascii_fixed(4)?
+            .as_bytes()
+            .try_into()
+            .unwrap();
+
+        let rgb_bit_count = reader.read_i32_le()?;
+
+        let r_bitmask = reader.read_u32_le()?;
+        let g_bitmask = reader.read_u32_le()?;
+        let b_bitmask = reader.read_u32_le()?;
+        let a_bitmask = reader.read_u32_le()?;
+
+        Ok(
+            Self {
+                size: 32i32,
+                flags,
+                fourcc,
+                rgb_bit_count,
+                r_bitmask,
+                g_bitmask,
+                b_bitmask,
+                a_bitmask
+            }
+        )
+    }
+
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
+        writer.write_i32_le(32)?;
+        writer.write_u32_le(self.flags.bits())?;
+
+        writer.write_ascii_fixed(
+            &String::from_utf8(self.fourcc.to_vec())
+                .map_err(|e| BinaryWriterError::custom(e.to_string()))?,
+            4)?;
+        
+        writer.write_i32_le(self.rgb_bit_count)?;
+        writer.write_u32_le(self.r_bitmask)?;
+        writer.write_u32_le(self.g_bitmask)?;
+        writer.write_u32_le(self.b_bitmask)?;
+        writer.write_u32_le(self.a_bitmask)
+    }
+
+}
+
+
+#[derive(Clone)]
+pub struct DX10Header {
+    pub dxgi_format: DxgiFormat, // u32
+    pub resource_dimension: D3D10ResourceDimension,
+    pub misc_flag: ResourceMisc, // u32, default 0?
+    pub array_size: u32, // typically one
+    pub alpha_mode: AlphaMode
+}
+
+impl Default for DX10Header {
+    fn default() -> Self {
+        Self {
+            dxgi_format: DxgiFormat::UNKNOWN,
+            resource_dimension: D3D10ResourceDimension::default(),
+            misc_flag: ResourceMisc::empty(),
+            array_size: 1,
+            alpha_mode: AlphaMode::UNKNOWN
+        }
+    }
+}
+
+impl DX10Header {
+    pub fn get_default(dxgi_format: DxgiFormat) -> Self {
+        Self {
+            dxgi_format,
+            resource_dimension: D3D10ResourceDimension::TEXTURE2D,
+            misc_flag: ResourceMisc::TEXTURECUBE,
+            array_size: 1,
+            alpha_mode: AlphaMode::UNKNOWN
+        }
+    }
+}
+
+impl IO for DX10Header {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+        let dxgi_format = DxgiFormat::from_id(reader.read_u32_le()? as u8)
+            .map_err(|e| BinaryReaderError::custom(e.to_string()))?;
+
+        let resource_dimension = D3D10ResourceDimension::from_bits_retain(reader.read_u32_le()?);
+        let misc_flag = ResourceMisc::from_bits_retain(reader.read_u32_le()?);
+        let array_size = reader.read_u32_le()?;
+        let alpha_mode = AlphaMode::from_bits_retain(reader.read_u32_le()?);
+
+        Ok(
+            Self {
+                dxgi_format,
+                resource_dimension,
+                misc_flag,
+                array_size,
+                alpha_mode
+            }
+        )
+    }
+
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
+        writer.write_u32_le(self.dxgi_format.id() as u32)?;
+        writer.write_u32_le(self.resource_dimension.bits())?;
+        writer.write_u32_le(self.misc_flag.bits())?;
+        writer.write_u32_le(self.array_size)?;
+        writer.write_u32_le(self.alpha_mode.bits())
+    }
+}
+
+impl std::fmt::Debug for DX10Header {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DX10Header[Dimension: {:?} | Misc Flag: {:?} | Alpha Mode: {:?} | Array Size: {}]", 
+            self.resource_dimension, self.misc_flag, self.alpha_mode, self.array_size
+        )
+    }
+}
+
+
+#[derive(Clone)]
 pub struct DDSHeader {
-    magic: [u8; 4], // bytes, asserted = b"DDS " rstrip_null
+    _magic: [u8; 4], // bytes, asserted = b"DDS " rstrip_null
     size: u32, // asserted = 0x7C (124)
-    flags: u32,
-    pub height: u32,
-    pub width: u32,
-    pitch_or_linear_size: u32,
-    depth: u32,
-    pub mipmap_count: u32,
-    reserved_1: [u8; 11], // unused; other programs sometimes write codes here like 'NVTT'
+    pub flags: DDSD, // u32
+    pub height: i32,
+    pub width: i32,
+    pub pitch_or_linear_size: i32,
+    pub depth: i32,
+    pub mipmap_count: i32,
+    reserved_1: [i32; 11], // unused; other programs sometimes write codes here like 'NVTT'  (TODO: is this u8 or i32?)
     pub pixelformat: DDSPixelFormat, // offset 0x4C,
-    caps1: u32, // `DDSCAPS` bit flags,
-    caps2: u32, // `Self` bit flags,
-    caps3: u32, // unused,
-    caps4: u32, // unused,
-    reserved_2: u32 // unused
+    pub caps1: DDSCAPS, // u32
+    pub caps2: DDSCAPS2, // u32
+    caps3: i32, // unused,
+    caps4: i32, // unused,
+    reserved_2: i32 // unused
+}
+
+impl Default for DDSHeader {
+    fn default() -> Self {
+        Self {
+            _magic: *b"DDS ",
+            size: 0x7C,
+            flags: DDSD::default(),
+            height: 0,
+            width: 0,
+            pitch_or_linear_size: 0,
+            depth: 0,
+            mipmap_count: 1,
+            reserved_1: [0i32;11],
+            pixelformat: DDSPixelFormat::default(),
+            caps1: DDSCAPS::default(),
+            caps2: DDSCAPS2::default(),
+            caps3: 0,
+            caps4: 0,
+            reserved_2: 0
+        }
+    }
 }
 
 impl DDSHeader {
     pub fn validate(&self) -> Result<(), String> {
-        if &self.magic != b"DDS " {
+        if &self._magic != b"DDS " {
             return Err(format!(
                 "Invalid magic header: expected b\"DDS \", found {:?}",
-                self.magic
+                self._magic
             ));
         }
 
@@ -211,91 +413,302 @@ impl DDSHeader {
 
         Ok(())
     }
+}
 
-    /// Reads a DDS Header from any reader implementing `std::io::Read`.
-    pub fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
-        let mut buffer = [0u8; 96]; // mem::size_of::<DDSHeader>()
-        reader.read_exact(&mut buffer)?;
+impl IO for DDSHeader {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+        reader.assert_bytes(b"DDS ")?;
+        let size = reader.matches(|r| r.read_i32_le(), &[0x7C])? as u32;
 
-        let header: DDSHeader = unsafe { std::ptr::read(buffer.as_ptr() as *const _) };
+        let flags = DDSD::from_bits_retain(reader.read_u32_le()?);
 
-        header.validate().map_err(|e| IOError::new(ErrorKind::InvalidData, e))?;
+        let height = reader.read_i32_le()?;
+        let width = reader.read_i32_le()?;
+        let pitch_or_linear_size = reader.read_i32_le()?;
+        let depth = reader.read_i32_le()?;
+        let mipmap_count = reader.read_i32_le()?;
 
-        Ok(header)
+        let reserved_1: [i32; 11] = reader.multi(|r| r.read_i32_le(), 11)?
+            .try_into().unwrap();
+
+        let pixelformat = DDSPixelFormat::from_reader(reader)?;
+        let caps1 = DDSCAPS::from_bits_retain(reader.read_u32_le()?);
+        let caps2 = DDSCAPS2::from_bits_retain(reader.read_u32_le()?);
+
+        let caps3 = reader.read_i32_le()?;
+        let caps4 = reader.read_i32_le()?;
+        let reserved_2 = reader.read_i32_le()?;
+
+        Ok(
+            Self {
+                _magic: *b"DDS ",
+                size,
+                flags,
+                height,
+                width,
+                pitch_or_linear_size,
+                depth,
+                mipmap_count,
+                reserved_1,
+                pixelformat,
+                caps1,
+                caps2,
+                caps3,
+                caps4,
+                reserved_2
+            }
+        )
     }
-}
 
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
+        writer.write_bytes(b"DDS ")?;
+        writer.write_u32_le(0x7C)?; // size
 
-pub struct DX10Header {
-    dxgi_format: u32, // dxgi::DxgiFormat.value
-    resource_dimension: D3D10ResourceDimension,
-    misc_flag: u32, // RESOURCE_MISC; used for cubemaps
-    array_size: u32, // typically one
-    alpha_mode: AlphaMode
-}
+        writer.write_u32_le(self.flags.bits())?;
 
-impl DX10Header {
-    pub fn get_default(dxgi_format: DxgiFormat) -> Self {
-        Self {
-            dxgi_format: dxgi_format.id(),
-            resource_dimension: D3D10ResourceDimension::TEXTURE2D,
-            misc_flag: 0,
-            array_size: 1,
-            alpha_mode: AlphaMode::UNKNOWN
+        writer.write_i32_le(self.height)?;
+        writer.write_i32_le(self.width)?;
+        writer.write_i32_le(self.pitch_or_linear_size)?;
+        writer.write_i32_le(self.depth)?;
+        writer.write_i32_le(self.mipmap_count)?;
+
+        for value in &self.reserved_1 {
+            writer.write_i32_le(*value)?;
         }
-    }
 
-    pub fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
-        let mut buffer = [0u8; 16]; // mem::size_of::<DX10Header>()
-        reader.read_exact(&mut buffer)?;
+        self.pixelformat.to_writer(writer)?;
 
-        let header: DX10Header = unsafe { std::ptr::read(buffer.as_ptr() as *const _) };
+        writer.write_u32_le(self.caps1.bits())?;
+        writer.write_u32_le(self.caps2.bits())?;
 
-        Ok(header)
+        writer.write_i32_le(self.caps3)?;
+        writer.write_i32_le(self.caps4)?;
+        writer.write_i32_le(self.reserved_2)
     }
 }
 
-struct DDS {
-    header: Option<DDSHeader>,
-    dx10_headerr: Option<DX10Header>,
-    data: Vec<u8>,
-    dcx_type: DCXType
+impl std::fmt::Debug for DDSHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DDSHeader[Dimensions: {}x{} | Flags: {:?} | Format: {:?} | CAPS: {:?} | CAPS2: {:?}]", 
+            self.width, self.height, self.flags, self.pixelformat, self.caps1, self.caps2
+        )
+    }
+}
+
+
+pub struct DDS {
+    pub header: DDSHeader,
+    pub dx10_header: Option<DX10Header>,
+    pub data: Vec<u8>,
+    pub dcx_type: DCXType
 }
 
 impl DDS {
-    pub fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
-        let mut buffer = [0u8; 96]; // mem::size_of::<DDSHeader>()
-        reader.read_exact(&mut buffer)?;
+    pub fn new() -> Self {
+        Self {
+            header: DDSHeader::default(),
+            dx10_header: None,
+            data: Vec::<u8>::new(),
+            dcx_type: DCXType::Unknown
+        }
+    }
 
-        let header: DDSHeader = DDSHeader::read_from(reader)?;
+    pub fn data_offset(&self) -> usize {
+        if self.header.pixelformat.fourcc == *b"DX10" { 0x94 } else { 0x80 }
+    }
+ 
+    pub fn dxgi_format(&self) -> DxgiFormat {
+        if let Some(h) = &self.dx10_header {
+            return h.dxgi_format;
+        }
+        // https://learn.microsoft.com/en-us/windows/uwp/gaming/complete-code-for-ddstextureloader
+        match &self.header.pixelformat.fourcc {
+            b"DXT1" | b"DXT2" => DxgiFormat::BC1_UNORM,
+            b"DXT3" => DxgiFormat::BC2_UNORM,
+            b"DXT4" | b"DXT5" => DxgiFormat::BC3_UNORM,
+            b"ATI1" => DxgiFormat::BC4_UNORM,
+            b"BC4S" => DxgiFormat::BC4_SNORM,
+            b"ATI2" | b"BC5U" => DxgiFormat::BC5_UNORM,
+            b"BC5S" => DxgiFormat::BC5_SNORM,
+            b"RGBG" => DxgiFormat::R8G8_B8G8_UNORM,
+            b"GRGB" => DxgiFormat::G8R8_G8B8_UNORM,
+            [36, 0, 0, 0] => DxgiFormat::R16G16B16A16_UNORM,
+            [110, 0, 0, 0] => DxgiFormat::R16G16B16A16_SNORM,
+            [111, 0, 0, 0] => DxgiFormat::R16_FLOAT,
+            [112, 0, 0, 0] => DxgiFormat::R16G16_FLOAT,
+            [113, 0, 0, 0] => DxgiFormat::R16G16B16A16_FLOAT,
+            [114, 0, 0, 0] => DxgiFormat::R32_FLOAT,
+            [115, 0, 0, 0] => DxgiFormat::R32G32_FLOAT,
+            [116, 0, 0, 0] => DxgiFormat::R32G32B32A32_FLOAT,
+            _ => DxgiFormat::R8G8B8A8_UNORM,
+        }
+    }
+
+    ///Returns self with headers parsed. Data is left empty.
+    pub fn read_headers(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+        let header = DDSHeader::from_reader(reader)?;
 
         let dx10_header: Option<DX10Header> = if header.pixelformat.fourcc == *b"DX10" {
-            Some(DX10Header::read_from(reader)?)
+            Some(DX10Header::from_reader(reader)?)
         } else {
             None
         };
 
         Ok(
             Self {
-                header: Some(header),
-                dx10_headerr: dx10_header,
+                header,
+                dx10_header: dx10_header,
                 data: Vec::<u8>::new(),
                 dcx_type: DCXType::Null
             }
         )
+        
     }
 
-    //write_to
+    pub fn write_headers(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
+        self.header.to_writer(writer)?;
+        match self.dx10_header.as_mut() {
+            Some(mut h) => h.to_writer(writer)?,
+            None => {}
+        }
+        Ok(())
+    }
 
+    pub fn to_file(&mut self, path: &Path) -> Result<(), BinaryWriterError> where Self: Sized {
+        let mut file = File::create_new(path)
+            .map_err(BinaryWriterError::IO)?;
+
+        file.write_all(&self.to_bytes()?)
+            .map_err(BinaryWriterError::IO)?;
+
+        Ok(())
+    }
+
+    ///Crop a block compressed (BC1-BC7) single-mip 2D texture without decompressing it. Returns a complete DDS file as bytes.
+    ///
+    ///`x`, `y`, `width` and `height` must be multiples of 4, because BC blocks are 4x4 texels and are stored independently.
+    pub fn crop(&self, x: u16, y: u16, width: u16, height: u16) -> Result<Vec<u8>, FerrisoulsError> {
+        let layout = FormatLayout::of(self.dxgi_format()).map_err(FerrisoulsError::Custom)?;
+        if layout.block_width != 4 || layout.block_height != 4 {
+            return Err(FerrisoulsError::custom("crop currently supports BC1 through BC7 formats only"));
+        }
+        let block_size = layout.bytes_per_block;
+ 
+        if [x, y, width, height].iter().any(|v| v % 4 != 0) {
+            return Err(FerrisoulsError::custom("All input values for block compressed cropping should be divisible by 4!"));
+        }
+        if width == 0 || height == 0 {
+            return Err(FerrisoulsError::custom("Crop width and height must be positive!"));
+        }
+ 
+        let src_width = self.header.width as usize;
+        let src_height = self.header.height as usize;
+
+        let (x, y, width, height) = (x as usize, y as usize, width as usize, height as usize);
+        if x + width > src_width || y + height > src_height {
+            return Err(FerrisoulsError::custom("Crop is too large!"));
+        }
+ 
+        //cropping the top mip alone would invalidate the remaining mip chain
+        if self.header.mipmap_count > 1 {
+            return Err(FerrisoulsError::custom("Cropping mipmapped textures is not supported!"));
+        }
+ 
+        if self.header.caps2.contains(DDSCAPS2::Cubemap)
+            || self.header.caps2.contains(DDSCAPS2::Volume)
+            || self.header.depth > 1 {
+            return Err(FerrisoulsError::custom("Cropping cubemaps, volume textures and texture arrays is not supported!"));
+        }
+ 
+        if self.dx10_header.as_ref().map(|h| h.array_size).unwrap_or(1) > 1 {
+            return Err(FerrisoulsError::custom("Cropping texture arrays is not supported!"));
+        }
+ 
+        let src_blocks_wide = src_width.div_ceil(4);
+        let src_blocks_high = src_height.div_ceil(4);
+        let crop_blocks_wide = width / 4;
+        let crop_blocks_high = height / 4;
+ 
+        let src_row_bytes = src_blocks_wide * block_size;
+        let crop_row_bytes = crop_blocks_wide * block_size;
+        let src_x_bytes = (x / 4) * block_size;
+        let src_y_blocks = y / 4;
+ 
+        let expected_src_len = src_row_bytes * src_blocks_high;
+        if self.data.len() < expected_src_len {
+            return Err(FerrisoulsError::custom("DDS texture data is truncated"));
+        }
+ 
+        let mut cropped_data = Vec::with_capacity(crop_row_bytes * crop_blocks_high);
+        for row in 0..crop_blocks_high {
+            let start = (src_y_blocks + row) * src_row_bytes + src_x_bytes;
+            cropped_data.extend_from_slice(&self.data[start..start + crop_row_bytes]);
+        }
+ 
+        let mut cropped = DDS {
+            header: self.header.clone(),
+            dx10_header: self.dx10_header.clone(),
+            data: cropped_data,
+            dcx_type: self.dcx_type,
+        };
+ 
+        cropped.header.width = width as i32;
+        cropped.header.height = height as i32;
+        cropped.header.pitch_or_linear_size = i32::try_from(cropped.data.len())
+            .map_err(|_| FerrisoulsError::custom("Cropped texture is too large for a DDS header."))?;
+        cropped.header.mipmap_count = 1;
+        cropped.header.depth = 0;
+ 
+        cropped.header.flags.remove(DDSD::PITCH | DDSD::MIPMAPCOUNT | DDSD::DEPTH);
+        cropped.header.flags.insert(DDSD::LINEARSIZE);
+        cropped.header.caps1.remove(DDSCAPS::COMPLEX | DDSCAPS::MIPMAP);
+ 
+        Ok(cropped.to_bytes()?)
+    }
 
 }
+
+impl IO for DDS {
+    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+        let mut dds = Self::read_headers(reader)?;
+        dds.data = reader.read_to_end();
+        Ok(dds)
+    }
+
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
+        self.write_headers(writer)?;
+        writer.write_bytes(&self.data)?;
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for DDS {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DDS[Dimensions: {}x{} | DCXType: {:?} | Size: {}]", 
+            self.header.width, self.header.height, self.dcx_type, self.data.len()
+        )
+    }
+}
+
+impl std::fmt::Debug for DDS {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ", self); // display first
+        write!(f, "{{\n     DX10: {}\n     Flags: {:?}\n     FourCC: {:?}\n     CAPS: {:?}\n     CAPS2: {:?}\n}}",
+            self.dx10_header.is_some(), self.header.flags, self.header.pixelformat.fourcc, self.header.caps1, self.header.caps2
+        )
+    }
+}
+
 
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use super::*;
 
     #[test]
-    fn fih() {
+    fn test_dds() {
+        let dds = DDS::from_path(Path::new("tests/SB_Icon_04.dds")).unwrap();
+        println!("{:?}", dds)
     }
 }

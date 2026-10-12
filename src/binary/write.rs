@@ -400,6 +400,19 @@ impl BinaryWriter {
 
     //region Generic writing
 
+    pub fn multi<T: Writable>(
+        &mut self,
+        f: impl Fn(&mut Self) -> Result<()>,
+        count: u64
+    ) -> Result<()> {
+
+        for _ in 0..count {
+            f(self)?
+        }
+
+        Ok(())
+    }
+
     #[inline]
     pub fn write<T: Writable>(&mut self, value: T) -> Result<()> {
         value.write_to(self)
