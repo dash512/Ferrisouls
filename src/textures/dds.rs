@@ -5,10 +5,11 @@ use std::io::{Error as IOError, ErrorKind, Read, Write};
 use bitflags::bitflags;
 pub use other_enums::*;
 use crate::binary::{BinaryReader, BinaryWriter, IO};
-use crate::textures::dxgi::{self, DxgiFormat};
 use crate::dcx::DCXType;
 use crate::errors::{BinaryReaderError, BinaryWriterError, DCXError, FerrisoulsError};
 use crate::textures::swizzling::FormatLayout;
+use crate::textures::dxgi::{DxgiFormat, bc::{self, Bc}};
+
 
 mod other_enums {
     use super::*;
@@ -664,6 +665,115 @@ impl DDS {
         cropped.header.caps1.remove(DDSCAPS::COMPLEX | DDSCAPS::MIPMAP);
  
         Ok(cropped)
+    }
+
+    ///Returns RGBA8 bytes and texture dimensions. Only the top mip of the first image is decoded.
+    pub fn to_rgba(&self) -> Result<(Vec<u8>, (usize, usize)), FerrisoulsError> {
+        let format: DxgiFormat = self.dxgi_format();
+
+        let width = usize::try_from(self.header.width)
+            .ok()
+            .filter(|&w| w > 0)
+            .ok_or_else(|| FerrisoulsError::custom("Invalid texture dimensions"))?;
+        let height = usize::try_from(self.header.height)
+            .ok()
+            .filter(|&h| h > 0)
+            .ok_or_else(|| FerrisoulsError::custom("Invalid texture dimensions"))?;
+
+        let output_len = width
+            .checked_mul(height)
+            .and_then(|n| n.checked_mul(4))
+            .ok_or_else(|| FerrisoulsError::custom("Output length overflow!"))?;
+
+        let data = &self.data;
+
+        if let Some(bytes_per_pixel) = bc::uncompressed_bpp(format) {
+            let required = width
+                .checked_mul(height)
+                .and_then(|n| n.checked_mul(bytes_per_pixel))
+                .ok_or_else(|| FerrisoulsError::custom("Required length overflow!"))?;
+
+            if data.len() < required {
+                return Err(FerrisoulsError::Custom(format!(
+                    "Not enough data! Need {required} bytes for {width}x{height} {format:?}, have {}.",
+                    data.len()
+                )));
+            }
+
+            let mut output = Vec::with_capacity(output_len);
+            for pixel in data[..required].chunks_exact(bytes_per_pixel) {
+                output.extend_from_slice(&bc::expand_pixel(format, pixel));
+            }
+            return Ok((output, (width, height)));
+        }
+
+        let (kind, block_bytes) = Bc::from_format(format).ok_or_else(|| {
+            FerrisoulsError::Custom(format!("Unsupported DXGI format for RGBA conversion: {format:?}"))
+        })?;
+
+        let blocks_x = width.div_ceil(4);
+        let blocks_y = height.div_ceil(4);
+
+        let required = blocks_x
+            .checked_mul(blocks_y)
+            .and_then(|n| n.checked_mul(block_bytes))
+            .ok_or_else(|| FerrisoulsError::custom("Required length overflow!"))?;
+
+        if data.len() < required {
+            return Err(FerrisoulsError::Custom(format!(
+                "Not enough data! Need {required} bytes for {width}x{height} {format:?}, have {}.",
+                data.len()
+            )));
+        }
+
+        let mut output = vec![0u8; output_len];
+        let mut rgba_block = [0u8; 4 * 4 * 4];
+
+        for by in 0..blocks_y {
+            for bx in 0..blocks_x {
+                let src_offset = (by * blocks_x + bx) * block_bytes;
+                kind.decode(&data[src_offset..src_offset + block_bytes], &mut rgba_block);
+
+                //only copy pixels inside the real image dimensions
+                let rows = (height - by * 4).min(4);
+                let cols = (width - bx * 4).min(4);
+
+                for py in 0..rows {
+                    let src = py * 4 * 4;
+                    let dst = ((by * 4 + py) * width + bx * 4) * 4;
+                    output[dst..dst + cols * 4].copy_from_slice(&rgba_block[src..src + cols * 4]);
+                }
+            }
+        }
+
+        Ok((output, (width, height)))
+    }
+
+    ///Encodes self in PNG format, returned as a vector of bytes.
+    pub fn to_png(&self) -> Result<Vec<u8>, FerrisoulsError> {
+        let (rgba, (width, height)) = self.to_rgba()?;
+
+        let mut buffer = Vec::new();
+        let mut encoder = png::Encoder::new(std::io::Cursor::new(&mut buffer), width as u32, height as u32);
+
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+
+        let mut writer = encoder.write_header()
+            .map_err(|e| FerrisoulsError::custom(e.to_string()))?;
+        writer.write_image_data(&rgba)
+            .map_err(|e| FerrisoulsError::custom(e.to_string()))?;
+        writer.finish()
+            .map_err(|e| FerrisoulsError::custom(e.to_string()))?;
+
+        Ok(buffer)
+    }
+
+    ///Writes self to a specified path. Encodes to PNG format. If you want to write raw DDS bytes, use `DDS::to_file` instead.
+    pub fn save_png(&mut self, path: &Path) -> Result<(), FerrisoulsError> {
+        let mut file = std::fs::File::create(path)?;
+        file.write_all(&self.to_png()?);
+        Ok(())
     }
 
 }

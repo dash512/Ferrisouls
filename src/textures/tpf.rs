@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::Path;
 
 use crate::binary::{BinaryReader, BinaryWriter, IO, bytes::ByteOrder};
@@ -9,7 +10,8 @@ use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 use crate::oodle::structs::OodleSettings;
 use crate::textures::dds::{DDS, DDSCAPS2, ResourceMisc};
 use crate::textures::headerizer;
-use crate::textures::dxgi::{DxgiFormat, bc::{self, Bc}};
+use crate::textures::dxgi::DxgiFormat;
+
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TPFPlatform {
@@ -236,104 +238,24 @@ impl TPFTexture {
     ///Returns RGBA8 bytes and texture dimensions. Only the top mip of the first image is decoded.
     pub fn to_rgba(&self) -> Result<(Vec<u8>, (usize, usize)), FerrisoulsError> {
         let dds = self.to_dds()?;
-        let format = dds.dxgi_format();
-
-        let width = usize::try_from(dds.header.width)
-            .ok()
-            .filter(|&w| w > 0)
-            .ok_or_else(|| FerrisoulsError::custom("Invalid texture dimensions"))?;
-        let height = usize::try_from(dds.header.height)
-            .ok()
-            .filter(|&h| h > 0)
-            .ok_or_else(|| FerrisoulsError::custom("Invalid texture dimensions"))?;
-
-        let output_len = width
-            .checked_mul(height)
-            .and_then(|n| n.checked_mul(4))
-            .ok_or_else(|| FerrisoulsError::custom("Output length overflow!"))?;
-
-        let data = &dds.data;
-
-        if let Some(bytes_per_pixel) = bc::uncompressed_bpp(format) {
-            let required = width
-                .checked_mul(height)
-                .and_then(|n| n.checked_mul(bytes_per_pixel))
-                .ok_or_else(|| FerrisoulsError::custom("Required length overflow!"))?;
-
-            if data.len() < required {
-                return Err(FerrisoulsError::Custom(format!(
-                    "Not enough data! Need {required} bytes for {width}x{height} {format:?}, have {}.",
-                    data.len()
-                )));
-            }
-
-            let mut output = Vec::with_capacity(output_len);
-            for pixel in data[..required].chunks_exact(bytes_per_pixel) {
-                output.extend_from_slice(&bc::expand_pixel(format, pixel));
-            }
-            return Ok((output, (width, height)));
-        }
-
-        let (kind, block_bytes) = Bc::from_format(format).ok_or_else(|| {
-            FerrisoulsError::Custom(format!("Unsupported DXGI format for RGBA conversion: {format:?}"))
-        })?;
-
-        let blocks_x = width.div_ceil(4);
-        let blocks_y = height.div_ceil(4);
-
-        let required = blocks_x
-            .checked_mul(blocks_y)
-            .and_then(|n| n.checked_mul(block_bytes))
-            .ok_or_else(|| FerrisoulsError::custom("Required length overflow!"))?;
-
-        if data.len() < required {
-            return Err(FerrisoulsError::Custom(format!(
-                "Not enough data! Need {required} bytes for {width}x{height} {format:?}, have {}.",
-                data.len()
-            )));
-        }
-
-        let mut output = vec![0u8; output_len];
-        let mut rgba_block = [0u8; 4 * 4 * 4];
-
-        for by in 0..blocks_y {
-            for bx in 0..blocks_x {
-                let src_offset = (by * blocks_x + bx) * block_bytes;
-                kind.decode(&data[src_offset..src_offset + block_bytes], &mut rgba_block);
-
-                //only copy pixels inside the real image dimensions
-                let rows = (height - by * 4).min(4);
-                let cols = (width - bx * 4).min(4);
-
-                for py in 0..rows {
-                    let src = py * 4 * 4;
-                    let dst = ((by * 4 + py) * width + bx * 4) * 4;
-                    output[dst..dst + cols * 4].copy_from_slice(&rgba_block[src..src + cols * 4]);
-                }
-            }
-        }
-
-        Ok((output, (width, height)))
+        dds.to_rgba()
     }
 
-    ///Writes self in PNG format to a specified path
-    pub fn save_png(&self, path: &Path) -> Result<(), FerrisoulsError> {
-        let (rgba, (width, height)) = self.to_rgba()?;
+    pub fn to_png(&self) -> Result<Vec<u8>, FerrisoulsError> {
+        let dds = self.to_dds()?;
+        dds.to_png()
+    }
 
-        let file = std::fs::File::create(path)?;
-        let writer = std::io::BufWriter::new(file);
+    ///Writes self texture to a specified path. Encodes to PNG if `png` is true, else writes raw DDS bytes.
+    pub fn save_as(&self, path: &Path, png: bool) -> Result<(), FerrisoulsError> {
+        let mut dds = self.to_dds()?;
 
-        let mut encoder = png::Encoder::new(writer, width as u32, height as u32);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-
-        let mut writer = encoder.write_header()
-            .map_err(|e| FerrisoulsError::custom(e.to_string()))?;
-        writer.write_image_data(&rgba)
-            .map_err(|e| FerrisoulsError::custom(e.to_string()))?;
-        writer.finish()
-            .map_err(|e| FerrisoulsError::custom(e.to_string()))?;
-
+        if png {
+            dds.save_png(path)?;
+        } else {
+            dds.to_file(path)?;
+        }
+        
         Ok(())
     }
 
@@ -781,14 +703,15 @@ use super::*;
     }
 
     #[test]
-    fn write_png() {
+    fn write_texture() {
         unsafe {crate::oodle::core::oodle_auto()};
 
         let (tpf, dt) = unsafe {
             TPF::unpack(Path::new("tests/common.tpf.dcx")).unwrap()
         };
 
-        tpf.textures[0].save_png(Path::new("C:/Users/lstr/Downloads/test.png")).unwrap();
+        tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.dds"), false).unwrap();
+        tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.png"), true).unwrap();
     }
 
     #[test]

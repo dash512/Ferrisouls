@@ -14,9 +14,11 @@ pub mod tpf;
 /// 
 ///As these DDS files are block-compressed, their dimensions must all be multiples of 4.
 /// 
-///Therefore, this code rounds all subtexture dimensions so that they are valid. These icons will not look
-/// identical to as they are in game, especially if they are small. If you want them to be cropped correctly,
+///Therefore, this code rounds all subtexture dimensions so that they are valid. Some of these icons will not look
+/// identical to how they are in game, especially if they are small. If you want them to be cropped correctly,
 /// use `TPFTexture::to_dds::to_bytes` and then pass the bytes to an external image handling library and convert it to a PNG.
+/// 
+///Item icons are generally aligned to 4x4 so if you're dumping those (as you're likely to), they should look fine.
 /// 
 /// ## Safety:
 /// 
@@ -70,14 +72,7 @@ pub unsafe fn dump_all_icons(tpf_path: &Path, sblyt_path: &Path, output_dir: &Pa
                     }
 
                     //create new dds using cropped bytes from the original
-                    let mut icon = DDS::from_bytes(
-                        &dds.crop(
-                            sub.x,
-                            sub.y,
-                            sub.width,
-                            sub.height
-                        )?
-                    )?;
+                    let mut icon = dds.crop(sub.x, sub.y, sub.width, sub.height)?;
                     //write dds file to the parent folder
                     icon.to_file(&texture_dir.join(format!("{}.dds", sub.name.replace(".png", ""))))?;
                 }
