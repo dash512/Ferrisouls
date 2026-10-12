@@ -584,10 +584,10 @@ impl DDS {
         Ok(())
     }
 
-    ///Crop a block compressed (BC1-BC7) single-mip 2D texture without decompressing it. Returns a complete DDS file as bytes.
+    ///Crop a block compressed (BC1-BC7) single-mip 2D texture without decompressing it. Returns a complete DDS file.
     ///
     ///`x`, `y`, `width` and `height` must be multiples of 4, because BC blocks are 4x4 texels and are stored independently.
-    pub fn crop(&self, x: u16, y: u16, width: u16, height: u16) -> Result<Vec<u8>, FerrisoulsError> {
+    pub fn crop(&self, x: u16, y: u16, width: u16, height: u16) -> Result<DDS, FerrisoulsError> {
         let layout = FormatLayout::of(self.dxgi_format()).map_err(FerrisoulsError::Custom)?;
         if layout.block_width != 4 || layout.block_height != 4 {
             return Err(FerrisoulsError::custom("crop currently supports BC1 through BC7 formats only"));
@@ -663,7 +663,7 @@ impl DDS {
         cropped.header.flags.insert(DDSD::LINEARSIZE);
         cropped.header.caps1.remove(DDSCAPS::COMPLEX | DDSCAPS::MIPMAP);
  
-        Ok(cropped.to_bytes()?)
+        Ok(cropped)
     }
 
 }

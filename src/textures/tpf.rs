@@ -363,7 +363,14 @@ impl TPFTexture {
         self.mipmap_count = rebuilt.mipmap_count;
         Ok(())
     }
-   
+    
+    ///Crops self texture in place by creating a new DDS from the given dimensions and calling `Self::replace` with it.
+    pub fn crop(&mut self, x: u16, y: u16, width: u16, height: u16) -> Result<(), FerrisoulsError> {
+        let cropped = self.to_dds()?
+            .crop(x, y, width, height)?;
+        self.replace(cropped)
+    }
+
     /// ## Safety:
     /// 
     ///Decompressor is unsafe due to calling oodle for KRAK. TPF entries are always DCP_EDGE and thus will never call unsafe code.
