@@ -643,7 +643,7 @@ impl IO for TPF {
  
             texture_data_size += tex.write_data(
                 writer, 
-                CompressSettings::DCPEDGE(DCXType::DCP_EDGE),
+                CompressSettings::DCPEDGE,
                 i
             )? as i64;
         }

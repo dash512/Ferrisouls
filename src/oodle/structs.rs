@@ -7,6 +7,7 @@ pub struct OodleSettings {
     pub compressor: Compressor,
     pub level: CompressionLevel
 }
+
 impl OodleSettings {
     pub const KRAK: OodleSettings = Self {
         compressor: Compressor::Kraken,

@@ -801,14 +801,29 @@ impl DCXType {
 
 #[derive(Debug)]
 pub enum CompressSettings {
-    Oodle(DCXType, OodleSettings),
+    Oodle(OodleSettings),
     DFLT(DCXType, u32), // zlib compression level
-    ZSTD(DCXType, i32), // zstd compression level
-    DCPDFLT(DCXType, u32), // zlib compression level
-    DCPEDGE(DCXType),
-    DCXEDGE(DCXType),
+    ZSTD(i32), // zstd compression level
+    DCPDFLT(u32), // zlib compression level
+    DCPEDGE,
+    DCXEDGE,
     Null,
     Unknown,
+}
+
+impl CompressSettings {
+    pub fn dcx_type(&self) -> DCXType {
+        match self {
+            Self::Unknown => DCXType::Unknown,
+            Self::Null => DCXType::Null,
+            Self::DCXEDGE => DCXType::DCX_EDGE,
+            Self::DCPEDGE => DCXType::DCP_EDGE,
+            Self::DCPDFLT(_) => DCXType::DCP_DFLT,
+            Self::ZSTD(_) => DCXType::DCX_ZSTD,
+            Self::Oodle(_) => DCXType::DCX_KRAK,
+            Self::DFLT(d,_) => *d
+        }
+    }
 }
 
 
@@ -1388,25 +1403,25 @@ impl Compress {
                 return Ok(raw_buffer.to_owned());
             }
 
-            CompressSettings::ZSTD(_, lvl) => {
+            CompressSettings::ZSTD(lvl) => {
                 Self::dcx_zstd(raw_buffer, *lvl)?
             }
 
-            CompressSettings::DCXEDGE(_) => {
+            CompressSettings::DCXEDGE => {
                 return Self::dcx_edge(raw_buffer);
             }
 
-            CompressSettings::DCPEDGE(_) => {
+            CompressSettings::DCPEDGE => {
                 return Self::dcp_edge(raw_buffer);
             }
 
-            CompressSettings::Oodle(_, osettings) => {
+            CompressSettings::Oodle(osettings) => {
                 let oodle = get_oodle()?;
                 unsafe { oodle.compress(raw_buffer, *osettings)? }
             }
 
             CompressSettings::DFLT(_, lvl)
-            | CompressSettings::DCPDFLT(_, lvl) => {
+            | CompressSettings::DCPDFLT(lvl) => {
                 let mut encoder =
                     ZlibEncoder::new(Vec::new(), ZCompression::new(*lvl));
 
@@ -1416,7 +1431,7 @@ impl Compress {
         };
 
         let level_override = match settings {
-            CompressSettings::ZSTD(_, lvl) => Some((*lvl).clamp(0, 255) as u8),
+            CompressSettings::ZSTD(lvl) => Some((*lvl).clamp(0, 255) as u8),
             _ => None,
         };
 
@@ -1431,10 +1446,10 @@ impl Compress {
                 Ok(output)
             }
 
-            CompressSettings::DFLT(dt, _) | CompressSettings::Oodle(dt, _)
-            | CompressSettings::ZSTD(dt, _) | CompressSettings::DCXEDGE(dt)
+            CompressSettings::DFLT(..) | CompressSettings::Oodle(..)
+            | CompressSettings::ZSTD(..) | CompressSettings::DCXEDGE
              => {
-                let vinfo = dt
+                let vinfo = settings.dcx_type()
                     .get_version_info()
                     .ok_or(DCXError::invalid_data("Compression type has no version information."))?;
 
@@ -1453,6 +1468,20 @@ impl Compress {
 
             _ => Err(DCXError::custom("This should never throw.").into())
         }
+    }
+
+    ///Compresses a file to the same directory, with `.compressed` appended to the file extension
+    pub unsafe fn file(path: &Path, settings: &CompressSettings) -> Result<(), FerrisoulsError> {
+        let output_file = path.with_added_extension("compressed");
+
+        let mut file_data = Vec::new();
+        File::open(path)?.read_to_end(&mut file_data)?;
+        let compressed = unsafe { Self::raw(&file_data, settings)? };
+
+        let mut file = File::create_new(output_file)?;
+        file.write_all(&compressed)?;
+
+        Ok(())
     }
 
 }
@@ -1503,7 +1532,7 @@ use super::*;
         let result = unsafe { Decompress::file(file).unwrap() };
         println!("Successfully decompressed {:?} bytes", result.0.len());
 
-        let compsettings = CompressSettings::Oodle(DCXType::DCX_KRAK, OodleSettings::KRAK);
+        let compsettings = CompressSettings::Oodle(OodleSettings::KRAK);
 
         let new_result = unsafe { Compress::raw(&result.0, &compsettings).unwrap() };
         println!("Successfully recompressed {:?} bytes", new_result.len());

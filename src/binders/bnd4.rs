@@ -340,7 +340,7 @@ impl BND4Entry {
         let uncompressed_size = self.data.len() as i64;
 
         let stored_data = if self.header.flags.is_compressed() {
-            let compset = CompressSettings::Oodle(DCXType::DCX_KRAK, OodleSettings::KRAK);
+            let compset = CompressSettings::Oodle(OodleSettings::KRAK);
             unsafe { Compress::raw(&self.data, &compset) }
                 .map_err(|e| BinaryWriterError::Custom(e.to_string()))?
 

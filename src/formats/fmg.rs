@@ -430,7 +430,7 @@ use crate::{dcx::CompressSettings, oodle::{core::init_oodle, structs::OodleSetti
     fn test_msg() {
         unsafe {init_oodle(Path::new("tests/oo2core_6_win64.dll"));}
 
-        let (mut fmg, dcx_type) = unsafe { 
+        let (mut fmg, _) = unsafe { 
             FMGBinder::unpack_binder(Path::new("tests/item.msgbnd.dcx")).unwrap() 
         };
 
@@ -447,7 +447,7 @@ use crate::{dcx::CompressSettings, oodle::{core::init_oodle, structs::OodleSetti
         unsafe {
             binder.to_file(
                 Path::new(r"C:/Users/lstr/Downloads/test.msgbnd.dcx"),
-                CompressSettings::Oodle(dcx_type, OodleSettings::KRAK)
+                CompressSettings::Oodle(OodleSettings::KRAK)
             ).unwrap();
         }
     }

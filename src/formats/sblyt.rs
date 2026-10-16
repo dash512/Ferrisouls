@@ -382,7 +382,7 @@ mod tests {
     fn full_layout_test() {
         unsafe { init_oodle(Path::new("tests/oo2core_6_win64.dll")) };
 
-        let (mut lyts, dcx_type) = unsafe { LayoutBinder::unpack_binder(
+        let (mut lyts, _) = unsafe { LayoutBinder::unpack_binder(
             Path::new("tests/01_common.sblytbnd.dcx")
         ).unwrap() };
 
@@ -396,7 +396,7 @@ mod tests {
         unsafe {
         binder.to_file(
             Path::new(r"C:/Users/lstr/Downloads/test.sblytbnd.dcx"),
-            CompressSettings::Oodle(dcx_type, OodleSettings::KRAK)
+            CompressSettings::Oodle(OodleSettings::KRAK)
         ).unwrap();
         }
     }
