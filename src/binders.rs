@@ -138,6 +138,12 @@ impl BinderFlags {
     
 }
 
+impl Default for BinderFlags {
+    fn default() -> Self {
+        Self::HAS_NAMES_1
+    }
+}
+
 
 impl EntryFlags {
     
@@ -164,6 +170,12 @@ impl EntryFlags {
         self.contains(Self::COMPRESSED)
     }
 
+}
+
+impl Default for EntryFlags {
+    fn default() -> Self {
+        Self::COMPRESSED
+    }
 }
 
 

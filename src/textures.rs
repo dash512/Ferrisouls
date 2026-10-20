@@ -1,5 +1,6 @@
-use std::path::Path;
+use std::{io::Write, path::Path};
 
+use crate::errors::FerrisoulsError;
 pub use crate::formats::{tpf, sblyt};
 
 pub mod dxgi;
@@ -91,7 +92,7 @@ pub unsafe fn dump_icons(tpf_path: &Path, sblyt_path: &Path, output_dir: &Path) 
 /// 
 /// This function loads BND4s, which are likely in KRAK format and thus need oo2core loaded. Safety cannot be guaranteed for 
 /// an external library.
-pub unsafe fn dump_atlases(tpf_path: &Path, output_dir: &Path)-> Result<(), crate::errors::FerrisoulsError> {
+pub unsafe fn dump_atlases(tpf_path: &Path, output_dir: &Path) -> Result<(), crate::errors::FerrisoulsError> {
     use crate::{binary::IO, binders::Binder};
     use crate::formats::tpf::TPF;
 
@@ -105,6 +106,43 @@ pub unsafe fn dump_atlases(tpf_path: &Path, output_dir: &Path)-> Result<(), crat
     }
     Ok(())
 }
+
+
+///Dump all Atlases from all TPFs in a given directory. Encodes to TGA format.
+/// 
+///Mainly useful for viewing images in JPEXS flash decompiler.
+pub unsafe fn dump_tgas(menu_path: &Path, output_dir: &Path) -> Result<(), crate::errors::FerrisoulsError> {
+    use crate::{binary::IO, binders::{Binder, MetaBinder}};
+    use crate::formats::{tpf::TPF, sblyt::{Layout, LayoutBinder}};
+    use crate::textures::dds::DDS;
+
+    unsafe { crate::oodle::core::oodle_auto().unwrap(); }
+    std::fs::create_dir_all(output_dir)?;
+
+    let mut tpfs = Vec::new();
+
+    for f in menu_path.read_dir().expect("failed to read directory!") {
+        if let Ok(l) = f 
+            && l.path().to_str().unwrap().contains(".tpf.") 
+        {
+            tpfs.push(l.path());
+        }
+    }
+
+    for tpf_path in tpfs {
+        let (mut tpf, _) = unsafe { TPF::unpack(&tpf_path)? };
+
+        for t in tpf.iter() {
+            std::fs::write(
+                output_dir.join(format!("{}.tga", t.name)),
+                t.to_tga()?,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
 
 
 #[cfg(test)]

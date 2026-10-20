@@ -8,7 +8,7 @@ use crate::oodle::structs::OodleSettings;
 use super::{BinderFlags, BinderVersion, EntryFlags, FerrisoulsError, hash_table::BinderHashTable};
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BND4Header {
     _magic: [u8;4], // asserted b"BND4"
 
@@ -159,7 +159,7 @@ impl BND4Header {
 
 
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct BND4EntryHeader {
     pub flags: EntryFlags,
 

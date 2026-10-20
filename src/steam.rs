@@ -1,120 +1,86 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use keyvalues_parser::{parse, Value};
-use winreg::enums::*;
-use winreg::RegKey;
 
+#[cfg(windows)]
 pub fn steam_install_path() -> Option<PathBuf> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
 
-    for key_path in [
-        r"SOFTWARE\Valve\Steam",
-        r"SOFTWARE\WOW6432Node\Valve\Steam",
-    ] {
-        if let Ok(key) = hklm.open_subkey(key_path) {
-            if let Ok(path) = key.get_value::<String, _>("InstallPath") {
-                return Some(PathBuf::from(path));
+    [r"SOFTWARE\WOW6432Node\Valve\Steam", r"SOFTWARE\Valve\Steam"]
+        .iter()
+        .find_map(|key_path| {
+            hklm.open_subkey(key_path)
+                .ok()?
+                .get_value::<String, _>("InstallPath")
+                .ok()
+                .map(PathBuf::from)
+        })
+}
+
+pub fn steam_library_paths() -> Vec<PathBuf> {
+    let Some(steam_path) = steam_install_path() else {
+        return Vec::new();
+    };
+
+    let Ok(text) = std::fs::read_to_string(steam_path.join("steamapps").join("libraryfolders.vdf"))
+    else {
+        return vec![steam_path]; // at least check the main install
+    };
+    let Ok(vdf) = parse(&text) else {
+        return vec![steam_path];
+    };
+
+    let mut paths = vec![steam_path];
+
+    if let Some(root) = vdf.value.get_obj() {
+        for values in root.values() {
+            for value in values {
+                if let Value::Obj(lib) = value {
+                    if let Some(p) = lib
+                        .get("path")
+                        .and_then(|v| v.first())
+                        .and_then(|v| v.get_str())
+                    {
+                        let p = PathBuf::from(p);
+                        if !paths.contains(&p) {
+                            paths.push(p);
+                        }
+                    }
+                }
             }
         }
     }
 
-    None
+    paths
 }
 
-
-pub fn find_steam_game(app_id: u32) -> Option<PathBuf> {
-    let steam_path = steam_install_path()?;
-
-    let library_file = steam_path
-        .join("steamapps")
-        .join("libraryfolders.vdf");
-
-    let text = std::fs::read_to_string(library_file).ok()?;
-    let vdf = keyvalues_parser::parse(&text).ok()?;
-
-    let root = vdf.value.unwrap_obj();
-
-    let libraries = root
-        .get("libraryfolders")?
-        .first()?
-        .get_obj()?;
-
-    for values in libraries.values() {
-        for library_value in values {
-            let Value::Obj(library) = library_value else {
-                continue;
-            };
-
-            let Some(path_value) = library
-                .get("path")
-                .and_then(|values| values.first())
-            else {
-                continue;
-            };
-
-            let Some(path_str) = path_value.get_str() else {
-                continue;
-            };
-
-            let library_path = PathBuf::from(path_str);
-
-            let manifest = library_path
-                .join("steamapps")
-                .join(format!("appmanifest_{app_id}.acf"));
-
-            if !manifest.is_file() {
-                continue;
-            }
-
-            let manifest_text = std::fs::read_to_string(&manifest).ok()?;
-            let manifest_vdf = keyvalues_parser::parse(&manifest_text).ok()?;
-
-            let manifest_root = manifest_vdf.value.unwrap_obj();
-
-            let app_state = manifest_root
-                .get("AppState")?
-                .first()?
-                .get_obj()?;
-
-            let install_dir = app_state
-                .get("installdir")?
-                .first()?
-                .get_str()?;
-
-            return Some(
-                library_path
-                    .join("steamapps")
-                    .join("common")
-                    .join(install_dir),
-            );
-        }
-    }
-
-    None
-}
-
-
-pub fn find_install_dir(manifest: &std::path::Path, library_path: PathBuf) -> Option<PathBuf> {
+pub fn find_install_dir(manifest: &Path, library_path: &Path) -> Option<PathBuf> {
     let text = std::fs::read_to_string(manifest).ok()?;
     let vdf = parse(&text).ok()?;
 
-    let root = vdf.value.unwrap_obj();
-
-    let app_state = root
-        .get("AppState")?
-        .first()?
-        .get_obj()?;
-
-    let install_dir = app_state
+    let install_dir = vdf
+        .value
+        .get_obj()?
         .get("installdir")?
         .first()?
         .get_str()?;
 
-    Some(
-        library_path
+    Some(library_path.join("steamapps").join("common").join(install_dir))
+}
+
+pub fn find_steam_game(app_id: u32) -> Option<PathBuf> {
+    steam_library_paths().into_iter().find_map(|library| {
+        let manifest = library
             .join("steamapps")
-            .join("common")
-            .join(install_dir),
-    )
+            .join(format!("appmanifest_{app_id}.acf"));
+
+        if !manifest.is_file() {
+            return None;
+        }
+        find_install_dir(&manifest, &library)
+    })
 }
 

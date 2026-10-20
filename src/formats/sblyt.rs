@@ -1,4 +1,6 @@
 use std::ffi::OsStr;
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 use std::fmt::Write;
 
@@ -115,7 +117,7 @@ impl Subtexture {
 ///This struct's `to_entry` and `from_entry` implement them differently, so `IO` isn't needed.
 /// 
 ///Attempting to call any `IO` functions on this struct will panic with `"not implemented"`.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Layout {
     pub _header: BND4EntryHeader, // used when repacking the layout
 
@@ -211,6 +213,21 @@ impl Layout {
             }
         }
 
+    }
+
+    pub fn from_file(path: &Path) -> Result<Self, BinaryReaderError> {
+        let filename = path.file_name().and_then(|s| s.to_str()).and_then(|s| Some(s.to_string()));
+
+        let mut file = File::open(path)?;
+
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+
+        Self::from_bytes(
+            filename,
+            BND4EntryHeader::default(),
+            &bytes
+        )
     }
 
 }

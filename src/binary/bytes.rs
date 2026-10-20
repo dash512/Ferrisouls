@@ -28,3 +28,9 @@ impl VariableUInt {
     }
 }
 
+impl Default for VariableUInt {
+    fn default() -> Self {
+        Self::UInt(0u32)
+    }
+}
+

@@ -546,38 +546,31 @@ impl OodleType {
     }
 
     pub fn find_oodle() -> Result<PathBuf, String> {
+        const CANDIDATES: [&str; 4] = [
+            "oo2core_6_win64.dll",
+            "Game/oo2core_6_win64.dll",
+            "Game/oo2core_8_win64.dll",
+            "Game/oo2core_9_win64.dll",
+        ];
+
         let try_find = |root: Option<&Path>| -> Option<PathBuf> {
             let root = root?;
-
-            for e in [
-                "oo2core_6_win64.dll",
-                "Game/oo2core_6_win64.dll",
-                "Game/oo2core_8_win64.dll",
-                "Game/oo2core_9_win64.dll",
-            ] {
-                let path = root.join(e);
-
-                if path.is_file() {
-                    return Some(path);
-                }
-            }
-            None
+            CANDIDATES.iter().map(|c| root.join(c)).find(|p| p.is_file())
         };
 
         let cwd = std::env::current_dir().ok();
-
         let exe_dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(Path::to_owned));
 
-        let any_game = find_steam_game(2622380)
-            .or_else(|| find_steam_game(1245620))
-            .or_else(|| find_steam_game(814380))
-            .or_else(|| find_steam_game(1888160));
-
         try_find(cwd.as_deref())
             .or_else(|| try_find(exe_dir.as_deref()))
-            .or_else(|| try_find(any_game.as_deref()))
+            .or_else(|| {
+                // er,     nr,     sdt,     ac6
+                [1245620, 2622380, 814380, 1888160]
+                    .into_iter()
+                    .find_map(|id| try_find(find_steam_game(id).as_deref()))
+            })
             .ok_or_else(|| "Couldn't find Oodle".to_string())
     }
 
