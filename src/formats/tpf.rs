@@ -8,7 +8,7 @@ use crate::dcx::{Compress, CompressSettings, DCXType};
 use crate::dcx::{DCXType::DCP_EDGE, Decompress};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 use crate::oodle::structs::OodleSettings;
-use crate::textures::dds::{DDS, DDSCAPS2, ResourceMisc};
+use crate::textures::dds::{DDS, DDSCAPS2, ImageExportFormat, ResourceMisc};
 use crate::textures::headerizer;
 use crate::textures::dxgi::DxgiFormat;
 
@@ -246,17 +246,15 @@ impl TPFTexture {
         dds.to_png()
     }
 
-    ///Writes self texture to a specified path. Encodes to PNG if `png` is true, else writes raw DDS bytes.
-    pub fn save_as(&self, path: &Path, png: bool) -> Result<(), FerrisoulsError> {
-        let mut dds = self.to_dds()?;
+    pub fn to_tga(&self) -> Result<Vec<u8>, FerrisoulsError> {
+        let dds = self.to_dds()?;
+        dds.to_tga()
+    }
 
-        if png {
-            dds.save_png(path)?;
-        } else {
-            dds.to_file(path)?;
-        }
-        
-        Ok(())
+    ///Writes self texture to a specified path.
+    pub fn save_as(&self, path: &Path, format: ImageExportFormat) -> Result<(), FerrisoulsError> {
+        let mut dds = self.to_dds()?;
+        dds.save_as(path, format)
     }
 
     ///Replaces self texture data with a given DDS.
@@ -710,8 +708,8 @@ use super::*;
             TPF::unpack(Path::new("tests/common.tpf.dcx")).unwrap()
         };
 
-        tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.dds"), false).unwrap();
-        tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.png"), true).unwrap();
+        tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.dds"), ImageExportFormat::DDS).unwrap();
+        tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.png"), ImageExportFormat::PNG).unwrap();
     }
 
     #[test]

@@ -10,6 +10,13 @@ use crate::errors::{BinaryReaderError, BinaryWriterError, DCXError, FerrisoulsEr
 use crate::textures::swizzling::FormatLayout;
 use crate::textures::dxgi::{DxgiFormat, bc::{self, Bc}};
 
+#[derive(Debug)]
+pub enum ImageExportFormat {
+    DDS,
+    PNG,
+    TGA
+}
+
 
 mod other_enums {
     use super::*;
@@ -769,6 +776,67 @@ impl DDS {
         Ok(buffer)
     }
 
+    ///Encodes self in TGA format, returned as a vector of bytes.
+    pub fn to_tga(&self) -> Result<Vec<u8>, FerrisoulsError> {
+        let (rgba, (width, height)) = self.to_rgba()?;
+
+        if !(rgba.len() ==  width as usize * height as usize * 4) {
+            return Err(FerrisoulsError::custom("RGBA data size doesn't match dimensions"));
+        }
+
+        let mut tga = Vec::with_capacity(18 + rgba.len());
+
+        //header
+        tga.push(0);// ID length
+        tga.push(0);// Color map type
+        tga.push(2);// Image type: uncompressed true-color
+
+        tga.extend_from_slice(&[0, 0]); // Color map origin
+        tga.extend_from_slice(&[0, 0]); // Color map length
+        tga.push(0); // Color map depth
+
+        tga.extend_from_slice(&[0, 0]); // X origin
+        tga.extend_from_slice(&[0, 0]); // Y origin
+
+        tga.extend_from_slice(&width.to_le_bytes());
+        tga.extend_from_slice(&height.to_le_bytes());
+
+        tga.push(32); // Bits per pixel
+        tga.push(0x28); // 8-bit alpha + top-left origin
+
+        //RGBA -> BGRA
+        for pixel in rgba.chunks_exact(4) {
+            let r = pixel[0];
+            let g = pixel[1];
+            let b = pixel[2];
+            let a = pixel[3];
+
+            tga.extend_from_slice(&[b, g, r, a]);
+        }
+
+        Ok(tga)
+    }
+    
+    ///Writes self to a given path, encoded in a given format.
+    pub fn save_as(&mut self, path: &Path, format: ImageExportFormat) -> Result<(), FerrisoulsError> {
+        match format {
+            ImageExportFormat::DDS => {
+                let mut file = std::fs::File::create(path)?;
+                self.to_file(path)?;
+            },
+            ImageExportFormat::PNG => {
+                let mut file = std::fs::File::create(path)?;
+                file.write_all(&self.to_png()?);
+            },
+            ImageExportFormat::TGA => {
+                let mut file = std::fs::File::create(path)?;
+                file.write_all(&self.to_tga()?);
+            },
+            f=> { return Err(FerrisoulsError::Custom(format!("Invalid save format: {f:?}"))); }
+        }
+        
+        Ok(())
+    }
     ///Writes self to a specified path. Encodes to PNG format. If you want to write raw DDS bytes, use `DDS::to_file` instead.
     pub fn save_png(&mut self, path: &Path) -> Result<(), FerrisoulsError> {
         let mut file = std::fs::File::create(path)?;

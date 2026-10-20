@@ -1,0 +1,27 @@
+<TextureAtlas imagePath="MENU_Common_00101.png" width="1024" height="128">
+	<SubTexture name="Icon-0.png" x="0" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-1.png" x="40" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-2.png" x="80" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-3.png" x="120" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-4.png" x="160" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-5.png" x="200" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-6.png" x="240" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-7.png" x="280" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-8.png" x="320" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-9.png" x="360" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-10.png" x="400" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-11.png" x="440" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-12.png" x="480" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-13.png" x="520" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-14.png" x="560" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-15.png" x="600" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-16.png" x="640" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-17.png" x="680" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-18.png" x="720" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-19.png" x="760" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-20.png" x="800" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-21.png" x="840" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-22.png" x="880" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-23.png" x="920" y="0" width="40" height="80"/>
+	<SubTexture name="Icon-24.png" x="960" y="0" width="40" height="80"/>
+</TextureAtlas>

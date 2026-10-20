@@ -1,11 +1,12 @@
 use std::path::Path;
 
+pub use crate::formats::{tpf, sblyt};
+
 pub mod dxgi;
 pub mod dds;
 pub mod utils;
 pub mod swizzling;
 pub mod headerizer;
-pub mod tpf;
 
 
 ///Dumps all icons in the binder by cropping them according to dimensions defined in the shoebox layout.
@@ -26,10 +27,10 @@ pub mod tpf;
 /// 
 /// This function loads BND4s, which are likely in KRAK format and thus need oo2core loaded. Safety cannot be guaranteed for 
 /// an external library.
-pub unsafe fn dump_all_icons(tpf_path: &Path, sblyt_path: &Path, output_dir: &Path) -> Result<(), crate::errors::FerrisoulsError> {
+pub unsafe fn dump_icons(tpf_path: &Path, sblyt_path: &Path, output_dir: &Path) -> Result<(), crate::errors::FerrisoulsError> {
     use crate::{binary::IO, binders::{Binder, MetaBinder}};
-    use crate::formats::sblyt::{Layout, LayoutBinder};
-    use crate::textures::{dds::DDS, tpf::TPF};
+    use crate::formats::{tpf::TPF, sblyt::{Layout, LayoutBinder}};
+    use crate::textures::dds::DDS;
 
     //try to automatically find and load oo2core
     unsafe { crate::oodle::core::oodle_auto().unwrap(); }
@@ -84,6 +85,27 @@ pub unsafe fn dump_all_icons(tpf_path: &Path, sblyt_path: &Path, output_dir: &Pa
     Ok(())
 }
 
+///Exports all Atlases in a given TPF to the output directory as `.tga` files.
+/// 
+/// ## Safety:
+/// 
+/// This function loads BND4s, which are likely in KRAK format and thus need oo2core loaded. Safety cannot be guaranteed for 
+/// an external library.
+pub unsafe fn dump_atlases(tpf_path: &Path, output_dir: &Path)-> Result<(), crate::errors::FerrisoulsError> {
+    use crate::{binary::IO, binders::Binder};
+    use crate::formats::tpf::TPF;
+
+    unsafe { crate::oodle::core::oodle_auto().unwrap(); }
+
+    std::fs::create_dir_all(output_dir)?;
+    let (tpf, _) = unsafe { TPF::unpack(tpf_path)? };
+
+    for tex in tpf.into_iter() {
+        tex.save_as(&output_dir.join(tex.name.clone()).with_extension("tga"), dds::ImageExportFormat::TGA);
+    }
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -92,7 +114,17 @@ mod tests {
     #[test]
     fn test_dumper() {
         unsafe {
-            dump_all_icons(
+            dump_atlases(
+                &Path::new("tests/common.tpf.dcx"),
+                &Path::new(r"C:\Users\lstr\Downloads\Textures")
+            ).unwrap()
+        }
+    }
+
+    #[test]
+    fn test_icon_dumper() {
+        unsafe {
+            dump_icons(
                 &Path::new("tests/01_common.tpf.dcx"),
                 &Path::new("tests/01_common.sblytbnd.dcx"),
                 &Path::new(r"C:\Users\lstr\Downloads\Textures")
