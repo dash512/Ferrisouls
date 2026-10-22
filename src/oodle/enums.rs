@@ -1,4 +1,4 @@
-
+//! This module contains some enums used by Oodle
 
 #[repr(i32)]
 pub enum CheckCRC {

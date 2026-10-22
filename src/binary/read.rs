@@ -1,4 +1,7 @@
-/// Logic adapted from SoulsFormatsNext and Constrata
+//! A module containing a BinaryReader which handles reading any data that is at some point in binary format.
+//! 
+//! Heavily inspired by [SoulsFormatsNEXT](https://github.com/soulsmods/SoulsFormatsNEXT)
+//! and Grimrukh's [Constrata](https://github.com/Grimrukh/constrata).
 
 use std::fmt::Debug;
 use std::io::Cursor;

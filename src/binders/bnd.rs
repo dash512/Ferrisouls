@@ -1,3 +1,5 @@
+//! General purpose container used in very old games such as Metal Wolf Chaos
+
 use super::{BinderFlags, EntryFlags};
 use crate::binary::{IO, BinaryReader, BinaryWriter, bytes::VariableUInt};
 use crate::binders::{Binder, BinderEntry, BinderVersion};
@@ -268,10 +270,8 @@ impl IO for BND {
 
 impl Binder for BND {
     const VERSION: BinderVersion = BinderVersion::V1;
-
     type Entry = BNDEntry;
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry> {
-        &mut self.entries
-    }
+    fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
 }

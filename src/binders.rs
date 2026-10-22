@@ -1,3 +1,5 @@
+//! Module containing traits and shared stuff for Binder types.
+
 use std::{cmp::Ordering, path::Path};
 
 use bitflags::bitflags;
@@ -251,53 +253,55 @@ pub trait Binder {
     const VERSION: BinderVersion; // BinderVersion
     type Entry: BinderEntry; 
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry>;
+    fn entries(&self) -> &Vec<Self::Entry>;
 
-    fn get(&mut self, index: usize) -> Option<&<Self as Binder>::Entry> {
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry>;
+
+    fn get(&self, index: usize) -> Option<&<Self as Binder>::Entry> {
         self.entries().get(index)
     }
 
     fn get_mut(&mut self, index: usize) -> Option<&mut <Self as Binder>::Entry> {
-        self.entries().get_mut(index)
+        self.entries_mut().get_mut(index)
     }
 
     fn add(&mut self, entry: Self::Entry) {
-        self.entries().push(entry);
+        self.entries_mut().push(entry);
     }
     
     fn remove(&mut self, index: usize) {
-        self.entries().remove(index);
+        self.entries_mut().remove(index);
     }
     
-    fn first(&mut self) -> Option<&<Self as Binder>::Entry> {
+    fn first(&self) -> Option<&<Self as Binder>::Entry> {
         self.entries().first()
     }
 
-    fn last(&mut self) -> Option<&<Self as Binder>::Entry> {
+    fn last(&self) -> Option<&<Self as Binder>::Entry> {
         self.entries().last()
     }
 
     fn pop_last(&mut self) -> Option<Self::Entry> {
-        self.entries().pop()
+        self.entries_mut().pop()
     }
 
     fn clear(&mut self) {
-        self.entries().clear();
+        self.entries_mut().clear();
     }
 
-    fn count(&mut self) -> usize {
+    fn count(&self) -> usize {
         self.entries().len()
     }
 
-    fn iter(&mut self) -> std::slice::Iter<'_, <Self as Binder>::Entry> {
+    fn iter(&self) -> std::slice::Iter<'_, <Self as Binder>::Entry> {
         self.entries().iter()
     }
 
     fn iter_mut(&mut self) -> std::slice::IterMut<'_, <Self as Binder>::Entry> {
-        self.entries().iter_mut()
+        self.entries_mut().iter_mut()
     }
 
-    fn find(&mut self, id: <<Self as Binder>::Entry as BinderEntry>::Identifier) -> Option<&Self::Entry> {
+    fn find(&self, id: <<Self as Binder>::Entry as BinderEntry>::Identifier) -> Option<&Self::Entry> {
         self.entries()
             .iter()
             .find(
@@ -307,7 +311,7 @@ pub trait Binder {
     }
 
     fn find_mut(&mut self, id: <<Self as Binder>::Entry as BinderEntry>::Identifier) -> Option<&mut Self::Entry> {
-        self.entries()
+        self.entries_mut()
             .iter_mut()
             .find(
                 |e|
@@ -323,7 +327,7 @@ pub trait Binder {
         I: Fn(&Self::Entry) -> &str,
         F: FnMut(&mut Self::Entry),
     {
-        for entry in self.entries().iter_mut() {
+        for entry in self.entries_mut().iter_mut() {
             if pattern.is_match(identity(entry)) {
                 f(entry);
             }
@@ -339,19 +343,19 @@ pub trait Binder {
     */
 
     fn insert(&mut self, index: usize, entry: Self::Entry) -> &mut <Self as Binder>::Entry {
-        self.entries().insert_mut(index, entry)
+        self.entries_mut().insert_mut(index, entry)
     }
 
-    fn is_empty(&mut self) -> bool {
+    fn is_empty(&self) -> bool {
         self.entries().is_empty()
     }
 
     fn append(&mut self, other: &mut Vec<Self::Entry>) {
-        self.entries().append(other)
+        self.entries_mut().append(other)
     }
 
     fn extend(&mut self, other: Vec<Self::Entry>) {
-        self.entries().extend(other)
+        self.entries_mut().extend(other)
     }
 
 }
@@ -401,7 +405,7 @@ pub trait MetaBinder: IO + Binder {
     /// 
     ///You may then want to call `to_file` on the resulting binder to compress and write.
     unsafe fn pack_binder(&mut self) -> Result<BND4, BinaryWriterError> where Self::Entry: MetaEntry {
-        let entries = self.entries().iter_mut()
+        let entries = self.entries_mut().iter_mut()
             .map(|e| e.to_entry())
             .collect::<Result<Vec<_>, _>>()?;
 

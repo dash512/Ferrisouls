@@ -1,3 +1,5 @@
+//! Parent module for Param stuff. WIP
+
 use crate::errors::FerrisoulsError;
 
 pub mod param;

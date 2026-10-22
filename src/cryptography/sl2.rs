@@ -1,4 +1,6 @@
-// Logic adapted from SoulsFormats
+//! Decryption and Encryption for .sl2 save files.
+//! 
+//! Basic logic adapted from [SoulsFormatsNEXT](https://github.com/soulsmods/SoulsFormatsNEXT/blob/master/SoulsFormats/Utilities/Cryptography/SL2Decryptor.cs) 
 
 use std::{fs::File, path::Path};
 use std::io::Read;

@@ -1,3 +1,5 @@
+//! A simple TPF binder, which is essentially just a generic BND4 that contains textures in DDS format.
+
 use std::io::Write;
 use std::path::Path;
 
@@ -8,9 +10,10 @@ use crate::dcx::{Compress, CompressSettings, DCXType};
 use crate::dcx::{DCXType::DCP_EDGE, Decompress};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 use crate::oodle::structs::OodleSettings;
-use crate::textures::dds::{DDS, DDSCAPS2, ImageExportFormat, ResourceMisc};
+use crate::textures::dds::{DDS, DDSCAPS2, ResourceMisc};
 use crate::textures::headerizer;
 use crate::textures::dxgi::DxgiFormat;
+use crate::textures::image::ImageFormat;
 
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -234,27 +237,21 @@ impl TPFTexture {
 
         Ok(dds)
     }
-
-    ///Returns RGBA8 bytes and texture dimensions. Only the top mip of the first image is decoded.
-    pub fn to_rgba(&self) -> Result<(Vec<u8>, (usize, usize)), FerrisoulsError> {
-        let dds = self.to_dds()?;
-        dds.to_rgba()
-    }
-
-    pub fn to_png(&self) -> Result<Vec<u8>, FerrisoulsError> {
-        let dds = self.to_dds()?;
-        dds.to_png()
-    }
-
-    pub fn to_tga(&self) -> Result<Vec<u8>, FerrisoulsError> {
-        let dds = self.to_dds()?;
-        dds.to_tga()
+ 
+    pub fn to(&self, format: ImageFormat) -> Result<Vec<u8>, FerrisoulsError> {
+        let mut dds = self.to_dds()?;
+        Ok(match format {
+            ImageFormat::DDS(_) => dds.to_bytes()?,
+            ImageFormat::RGBA => dds.to_image()?.data,
+            ImageFormat::PNG => dds.to_image()?.to_png()?,
+            ImageFormat::TGA => dds.to_image()?.to_tga()?
+        })
     }
 
     ///Writes self texture to a specified path.
-    pub fn save_as(&self, path: &Path, format: ImageExportFormat) -> Result<(), FerrisoulsError> {
+    pub fn save_as(&self, path: &Path, format: ImageFormat) -> Result<(), FerrisoulsError> {
         let mut dds = self.to_dds()?;
-        dds.save_as(path, format)
+        dds.to_image()?.save(path, format)
     }
 
     ///Replaces self texture data with a given DDS.
@@ -517,16 +514,16 @@ impl std::fmt::Display for TPFTexture {
 pub struct TPF {
     _magic: [u8;4], // asserted b"TPF\0"
 
-    _data_size: usize,
-    file_count: usize,
+    pub _data_size: usize,
+    pub file_count: usize,
 
-    platform: TPFPlatform,
-    tpf_flags: u8, // asserted [0, 1, 2, 3]
-    encoding: u8, // asserted [0, 1, 2] where: 2 == UTF-16, 0/1 == shift_jis_2004
+    pub platform: TPFPlatform,
+    pub tpf_flags: u8, // asserted [0, 1, 2, 3]
+    pub encoding: u8, // asserted [0, 1, 2] where: 2 == UTF-16, 0/1 == shift_jis_2004
 
     _pad1: u8, // b'\0'
 
-    textures: Vec<TPFTexture>,
+    pub textures: Vec<TPFTexture>,
 }
 
 impl Default for TPF {
@@ -659,9 +656,8 @@ impl Binder for TPF {
     const VERSION: BinderVersion = BinderVersion::VARIABLE; // can be 3 or 4. TODO: is this correct?
     type Entry = TPFTexture;
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry> {
-        &mut self.textures
-    }
+    fn entries(&self) -> &Vec<Self::Entry> { &self.textures }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.textures }
 }
 
 impl<'a> IntoIterator for &'a TPF {
@@ -708,8 +704,8 @@ use super::*;
             TPF::unpack(Path::new("tests/common.tpf.dcx")).unwrap()
         };
 
-        tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.dds"), ImageExportFormat::DDS).unwrap();
-        tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.png"), ImageExportFormat::PNG).unwrap();
+        tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.dds"), ImageFormat::DDS(DxgiFormat::BC7_UNORM)).unwrap();
+        tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.png"), ImageFormat::PNG).unwrap();
     }
 
     #[test]

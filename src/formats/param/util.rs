@@ -1,3 +1,5 @@
+//! Various utilities for use in the `param.rs` module.
+
 use crate::errors::FerrisoulsError;
 use crate::formats::param::cell::CellValue;
 use crate::formats::param::paramdef::{DefType, EditFlags, Field, Paramdef};

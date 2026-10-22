@@ -1,3 +1,6 @@
+//! This module contains the generic `IO` trait which is used for structs that are represented as bytes at any point.
+//! It allows read and write operations with custom logic over how the data structure is handled.
+
 pub mod bytes;
 pub mod read;
 pub mod write;

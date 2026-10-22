@@ -1,3 +1,5 @@
+//! This module handles anything to do with DCX compressed files. Includes type detection and de/compression functions.
+
 use std::error::Error;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::{fmt, fs};

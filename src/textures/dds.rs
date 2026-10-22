@@ -1,3 +1,6 @@
+//! This module handles any DDS files, primarily used from TPF textures. It parses the headers and then passes
+//! the bytes straight through to a vector without any processing.
+
 use std::fs::File;
 use std::path::Path;
 use std::{io, error::Error, ops::BitOrAssign};
@@ -8,14 +11,9 @@ use crate::binary::{BinaryReader, BinaryWriter, IO};
 use crate::dcx::DCXType;
 use crate::errors::{BinaryReaderError, BinaryWriterError, DCXError, FerrisoulsError};
 use crate::textures::swizzling::FormatLayout;
-use crate::textures::dxgi::{DxgiFormat, bc::{self, Bc}};
+use crate::textures::dxgi::DxgiFormat;
+use crate::textures::image::{self, Bc, ImageFormat, RgbaImage};
 
-#[derive(Debug)]
-pub enum ImageExportFormat {
-    DDS,
-    PNG,
-    TGA
-}
 
 
 mod other_enums {
@@ -596,246 +594,22 @@ impl DDS {
     ///
     ///`x`, `y`, `width` and `height` must be multiples of 4, because BC blocks are 4x4 texels and are stored independently.
     pub fn crop(&self, x: u16, y: u16, width: u16, height: u16) -> Result<DDS, FerrisoulsError> {
-        let layout = FormatLayout::of(self.dxgi_format()).map_err(FerrisoulsError::Custom)?;
-        if layout.block_width != 4 || layout.block_height != 4 {
-            return Err(FerrisoulsError::custom("crop currently supports BC1 through BC7 formats only"));
-        }
-        let block_size = layout.bytes_per_block;
- 
-        if [x, y, width, height].iter().any(|v| v % 4 != 0) {
-            return Err(FerrisoulsError::custom("All input values for block compressed cropping should be divisible by 4!"));
-        }
-        if width == 0 || height == 0 {
-            return Err(FerrisoulsError::custom("Crop width and height must be positive!"));
-        }
- 
-        let src_width = self.header.width as usize;
-        let src_height = self.header.height as usize;
-
-        let (x, y, width, height) = (x as usize, y as usize, width as usize, height as usize);
-        if x + width > src_width || y + height > src_height {
-            return Err(FerrisoulsError::custom("Crop is too large!"));
-        }
- 
-        //cropping the top mip alone would invalidate the remaining mip chain
-        if self.header.mipmap_count > 1 {
-            return Err(FerrisoulsError::custom("Cropping mipmapped textures is not supported!"));
-        }
- 
-        if self.header.caps2.contains(DDSCAPS2::Cubemap)
-            || self.header.caps2.contains(DDSCAPS2::Volume)
-            || self.header.depth > 1 {
-            return Err(FerrisoulsError::custom("Cropping cubemaps, volume textures and texture arrays is not supported!"));
-        }
- 
-        if self.dx10_header.as_ref().map(|h| h.array_size).unwrap_or(1) > 1 {
-            return Err(FerrisoulsError::custom("Cropping texture arrays is not supported!"));
-        }
- 
-        let src_blocks_wide = src_width.div_ceil(4);
-        let src_blocks_high = src_height.div_ceil(4);
-        let crop_blocks_wide = width / 4;
-        let crop_blocks_high = height / 4;
- 
-        let src_row_bytes = src_blocks_wide * block_size;
-        let crop_row_bytes = crop_blocks_wide * block_size;
-        let src_x_bytes = (x / 4) * block_size;
-        let src_y_blocks = y / 4;
- 
-        let expected_src_len = src_row_bytes * src_blocks_high;
-        if self.data.len() < expected_src_len {
-            return Err(FerrisoulsError::custom("DDS texture data is truncated"));
-        }
- 
-        let mut cropped_data = Vec::with_capacity(crop_row_bytes * crop_blocks_high);
-        for row in 0..crop_blocks_high {
-            let start = (src_y_blocks + row) * src_row_bytes + src_x_bytes;
-            cropped_data.extend_from_slice(&self.data[start..start + crop_row_bytes]);
-        }
- 
-        let mut cropped = DDS {
-            header: self.header.clone(),
-            dx10_header: self.dx10_header.clone(),
-            data: cropped_data,
-            dcx_type: self.dcx_type,
-        };
- 
-        cropped.header.width = width as i32;
-        cropped.header.height = height as i32;
-        cropped.header.pitch_or_linear_size = i32::try_from(cropped.data.len())
-            .map_err(|_| FerrisoulsError::custom("Cropped texture is too large for a DDS header."))?;
-        cropped.header.mipmap_count = 1;
-        cropped.header.depth = 0;
- 
-        cropped.header.flags.remove(DDSD::PITCH | DDSD::MIPMAPCOUNT | DDSD::DEPTH);
-        cropped.header.flags.insert(DDSD::LINEARSIZE);
-        cropped.header.caps1.remove(DDSCAPS::COMPLEX | DDSCAPS::MIPMAP);
- 
-        Ok(cropped)
+        image::crop_dds(self, x, y, width, height)
     }
 
-    ///Returns RGBA8 bytes and texture dimensions. Only the top mip of the first image is decoded.
-    pub fn to_rgba(&self) -> Result<(Vec<u8>, (usize, usize)), FerrisoulsError> {
-        let format: DxgiFormat = self.dxgi_format();
-
-        let width = usize::try_from(self.header.width)
-            .ok()
-            .filter(|&w| w > 0)
-            .ok_or_else(|| FerrisoulsError::custom("Invalid texture dimensions"))?;
-        let height = usize::try_from(self.header.height)
-            .ok()
-            .filter(|&h| h > 0)
-            .ok_or_else(|| FerrisoulsError::custom("Invalid texture dimensions"))?;
-
-        let output_len = width
-            .checked_mul(height)
-            .and_then(|n| n.checked_mul(4))
-            .ok_or_else(|| FerrisoulsError::custom("Output length overflow!"))?;
-
-        let data = &self.data;
-
-        if let Some(bytes_per_pixel) = bc::uncompressed_bpp(format) {
-            let required = width
-                .checked_mul(height)
-                .and_then(|n| n.checked_mul(bytes_per_pixel))
-                .ok_or_else(|| FerrisoulsError::custom("Required length overflow!"))?;
-
-            if data.len() < required {
-                return Err(FerrisoulsError::Custom(format!(
-                    "Not enough data! Need {required} bytes for {width}x{height} {format:?}, have {}.",
-                    data.len()
-                )));
-            }
-
-            let mut output = Vec::with_capacity(output_len);
-            for pixel in data[..required].chunks_exact(bytes_per_pixel) {
-                output.extend_from_slice(&bc::expand_pixel(format, pixel));
-            }
-            return Ok((output, (width, height)));
-        }
-
-        let (kind, block_bytes) = Bc::from_format(format).ok_or_else(|| {
-            FerrisoulsError::Custom(format!("Unsupported DXGI format for RGBA conversion: {format:?}"))
-        })?;
-
-        let blocks_x = width.div_ceil(4);
-        let blocks_y = height.div_ceil(4);
-
-        let required = blocks_x
-            .checked_mul(blocks_y)
-            .and_then(|n| n.checked_mul(block_bytes))
-            .ok_or_else(|| FerrisoulsError::custom("Required length overflow!"))?;
-
-        if data.len() < required {
-            return Err(FerrisoulsError::Custom(format!(
-                "Not enough data! Need {required} bytes for {width}x{height} {format:?}, have {}.",
-                data.len()
-            )));
-        }
-
-        let mut output = vec![0u8; output_len];
-        let mut rgba_block = [0u8; 4 * 4 * 4];
-
-        for by in 0..blocks_y {
-            for bx in 0..blocks_x {
-                let src_offset = (by * blocks_x + bx) * block_bytes;
-                kind.decode(&data[src_offset..src_offset + block_bytes], &mut rgba_block);
-
-                //only copy pixels inside the real image dimensions
-                let rows = (height - by * 4).min(4);
-                let cols = (width - bx * 4).min(4);
-
-                for py in 0..rows {
-                    let src = py * 4 * 4;
-                    let dst = ((by * 4 + py) * width + bx * 4) * 4;
-                    output[dst..dst + cols * 4].copy_from_slice(&rgba_block[src..src + cols * 4]);
-                }
-            }
-        }
-
-        Ok((output, (width, height)))
+    pub fn to_image(&self) -> Result<RgbaImage, FerrisoulsError> {
+        RgbaImage::from_dds(&self)
     }
 
-    ///Encodes self in PNG format, returned as a vector of bytes.
-    pub fn to_png(&self) -> Result<Vec<u8>, FerrisoulsError> {
-        let (rgba, (width, height)) = self.to_rgba()?;
-
-        let mut buffer = Vec::new();
-        let mut encoder = png::Encoder::new(std::io::Cursor::new(&mut buffer), width as u32, height as u32);
-
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-
-        let mut writer = encoder.write_header()
-            .map_err(|e| FerrisoulsError::custom(e.to_string()))?;
-        writer.write_image_data(&rgba)
-            .map_err(|e| FerrisoulsError::custom(e.to_string()))?;
-        writer.finish()
-            .map_err(|e| FerrisoulsError::custom(e.to_string()))?;
-
-        Ok(buffer)
+    pub fn to(&self, format: ImageFormat) -> Result<Vec<u8>, FerrisoulsError> {
+        let img = self.to_image()?;
+        Ok(match format {
+            ImageFormat::DDS(_) => self.data.clone(),
+            ImageFormat::RGBA => img.data,
+            ImageFormat::PNG => img.to_png()?,
+            ImageFormat::TGA => img.to_tga()?
+        })
     }
-
-    ///Encodes self in TGA format, returned as a vector of bytes.
-    pub fn to_tga(&self) -> Result<Vec<u8>, FerrisoulsError> {
-        let (rgba, (width, height)) = self.to_rgba()?;
-
-        if rgba.len() != width * height * 4 {
-            return Err(FerrisoulsError::custom("RGBA data size doesn't match dimensions"));
-        }
-
-        let mut tga = Vec::with_capacity(18 + rgba.len());
-
-        //header
-        tga.push(0);// ID length
-        tga.push(0);// Color map type
-        tga.push(2);// Image type: uncompressed true-color
-
-        tga.extend_from_slice(&[0, 0]); // Color map origin
-        tga.extend_from_slice(&[0, 0]); // Color map length
-        tga.push(0); // Color map depth
-
-        tga.extend_from_slice(&[0, 0]); // X origin
-        tga.extend_from_slice(&[0, 0]); // Y origin
-
-        tga.extend_from_slice(&(width as u16).to_le_bytes());
-        tga.extend_from_slice(&(height as u16).to_le_bytes());
-
-        tga.push(32); // Bits per pixel
-        tga.push(0x28); // 8-bit alpha + top-left origin
-
-        //RGBA -> BGRA
-        for pixel in rgba.chunks_exact(4) {
-            tga.extend_from_slice(&[
-                pixel[2],
-                pixel[1],
-                pixel[0],
-                pixel[3],
-            ]);
-        }
-
-        debug_assert_eq!(tga.len(), 18 + width * height * 4);
-
-        Ok(tga)
-    }
-
-    ///Writes self to a given path, encoded in a given format.
-    pub fn save_as(&mut self, path: &Path, format: ImageExportFormat) -> Result<(), FerrisoulsError> {
-        match format {
-            ImageExportFormat::DDS => {
-                self.to_file(path)?;
-            },
-            ImageExportFormat::PNG => {
-                std::fs::write(path, self.to_tga()?)?;
-            },
-            ImageExportFormat::TGA => {
-                std::fs::write(path, self.to_tga()?)?;
-            },
-            f=> { return Err(FerrisoulsError::Custom(format!("Invalid save format: {f:?}"))); }
-        }
-        
-        Ok(())
-    }   
 
 }
 

@@ -1,3 +1,5 @@
+//! PARAMDEFs that applied to PARAMs.
+
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::str::FromStr;

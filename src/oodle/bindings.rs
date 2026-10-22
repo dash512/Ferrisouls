@@ -1,3 +1,5 @@
+//! Definitions for Oodle's C functions.
+
 use std::ffi::c_void;
 
 pub mod o26 {

@@ -1,3 +1,5 @@
+//! A single param row.
+
 use std::collections::HashMap;
 use std::rc::Rc;
 

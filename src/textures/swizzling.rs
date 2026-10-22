@@ -1,3 +1,10 @@
+//! Module for handling swizzled console textures.
+//! 
+//! Logic for this module is HEAVILY inspired by and copied from [DrSwizzler](https://github.com/Shadowth117/DrSwizzler), 
+//! to the point of essentially just being a port.
+//! 
+//! None of this could I have done on my own so massive credit to [Shadowth117](https://github.com/Shadowth117/).
+
 use crate::textures::dxgi::DxgiFormat;
 use crate::textures::utils::{Morton8, MortonAlgorithms, PS5Util, SwitchUtil, VitaUtil, Xbox360Util};
 use crate::errors::SwizzleError;

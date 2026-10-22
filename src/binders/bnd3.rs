@@ -1,3 +1,5 @@
+//! General purpose container used before Dark Souls 2 (2014)
+
 use super::{BinderFlags, EntryFlags};
 use crate::binary::{IO, BinaryReader, BinaryWriter, bytes::VariableUInt};
 use crate::binders::{Binder, BinderEntry, BinderVersion};
@@ -299,11 +301,9 @@ impl IO for BND3 {
 
 impl Binder for BND3 {
     const VERSION: BinderVersion = BinderVersion::V1;
-
     type Entry = BND3Entry;
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry> {
-        &mut self.entries
-    }
+    fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
 }
 

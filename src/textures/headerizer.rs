@@ -1,8 +1,16 @@
+//! This module handles headerizing of headerless console DDS files. Also deswizzles inputs where needed.
+//! 
+//! Logic for this module is HEAVILY inspired by and copied from 
+//! [SoulsFormatsNEXT](https://github.com/soulsmods/SoulsFormatsNEXT/blob/master/SoulsFormats/Formats/TPF/Headerizer.cs)
+//! and [DrSwizzler](https://github.com/Shadowth117/DrSwizzler), to the point of essentially just being a port.
+//! 
+//! None of this could I have done on my own so massive credit to the big-brains who worked on those projects.
+
 use crate::binary::{BinaryReader, BinaryWriter, IO};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 use crate::textures::dds::{AlphaMode, D3D10ResourceDimension, DDS, DDSCAPS, DDSCAPS2, DDSD, DDSPF, DX10Header, ResourceMisc};
 use crate::textures::swizzling::{Deswizzler, FormatLayout, Swizzler};
-use crate::textures::tpf::{TextureType, TPFTexture, TPFPlatform};
+use crate::formats::tpf::{TextureType, TPFTexture, TPFPlatform};
 use crate::textures::dxgi::*;
 use crate::textures::utils::Util;
 

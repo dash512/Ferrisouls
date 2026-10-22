@@ -1,13 +1,18 @@
+//! This module contains some submodules for handling anything to do with textures,
+//! as well as some example functions for their uses in 'the field'.
+
 use std::{io::Write, path::Path};
 
 use crate::errors::FerrisoulsError;
-pub use crate::formats::{tpf, sblyt};
+
 
 pub mod dxgi;
 pub mod dds;
 pub mod utils;
 pub mod swizzling;
 pub mod headerizer;
+pub mod image;
+
 
 
 ///Dumps all icons in the binder by cropping them according to dimensions defined in the shoebox layout.
@@ -86,6 +91,7 @@ pub unsafe fn dump_icons(tpf_path: &Path, sblyt_path: &Path, output_dir: &Path) 
     Ok(())
 }
 
+
 ///Exports all Atlases in a given TPF to the output directory as `.tga` files.
 /// 
 /// ## Safety:
@@ -95,6 +101,7 @@ pub unsafe fn dump_icons(tpf_path: &Path, sblyt_path: &Path, output_dir: &Path) 
 pub unsafe fn dump_atlases(tpf_path: &Path, output_dir: &Path) -> Result<(), crate::errors::FerrisoulsError> {
     use crate::{binary::IO, binders::Binder};
     use crate::formats::tpf::TPF;
+    use crate::textures::image::ImageFormat;
 
     unsafe { crate::oodle::core::oodle_auto().unwrap(); }
 
@@ -102,44 +109,102 @@ pub unsafe fn dump_atlases(tpf_path: &Path, output_dir: &Path) -> Result<(), cra
     let (tpf, _) = unsafe { TPF::unpack(tpf_path)? };
 
     for tex in tpf.into_iter() {
-        tex.save_as(&output_dir.join(tex.name.clone()).with_extension("tga"), dds::ImageExportFormat::TGA);
+        tex.save_as(&output_dir.join(tex.name.clone()).with_extension("tga"), ImageFormat::TGA);
     }
     Ok(())
 }
 
 
-///Dump all Atlases from all TPFs in a given directory. Encodes to TGA format.
+///Dumps all Atlas images from any TPF binders found in the given `menu_path` directory. Images are encoded to TGA format.
+/// 
+///If `do_sprites` is true, then any layouts found in the same directory are used to crop the loaded Atlases
+/// and write all of their subtextures.
 /// 
 ///Mainly useful for viewing images in JPEXS flash decompiler.
-pub unsafe fn dump_tgas(menu_path: &Path, output_dir: &Path) -> Result<(), crate::errors::FerrisoulsError> {
+/// 
+/// ## Safety:
+/// 
+/// This function loads BND4s, which are likely in KRAK format and thus need oo2core loaded. Safety cannot be guaranteed for 
+/// an external library.
+pub unsafe fn dump_tgas(menu_path: &Path, output_dir: &Path, do_sprites: bool) -> Result<(), crate::errors::FerrisoulsError> {
     use crate::{binary::IO, binders::{Binder, MetaBinder}};
-    use crate::formats::{tpf::TPF, sblyt::{Layout, LayoutBinder}};
-    use crate::textures::dds::DDS;
+    use crate::formats::{tpf::{TPF, TPFTexture}, sblyt::{Layout, LayoutBinder}};
+    use crate::textures::image::{self, ImageFormat};
+    use crate::files;
 
     unsafe { crate::oodle::core::oodle_auto().unwrap(); }
+
     std::fs::create_dir_all(output_dir)?;
 
-    let mut tpfs = Vec::new();
+    let tpfs = files::get_files_by(
+        menu_path.to_path_buf(), 
+        |s| s.ends_with(".tpf") || s.ends_with(".tpf.dcx")
+    );
+    let sblyts = files::get_files_by(
+        menu_path.to_path_buf(), 
+        |s| s.contains(".sblytbnd")
+    );
 
-    for f in menu_path.read_dir().expect("failed to read directory!") {
-        if let Ok(l) = f 
-            && l.path().to_str().unwrap().contains(".tpf.") 
-        {
-            tpfs.push(l.path());
+    let mut textures: Vec<TPFTexture> = Vec::new();
+    let mut layouts: Vec<Layout> = Vec::new();
+
+    {
+        for tpf_path in tpfs {
+            let (tpf, _) = unsafe { TPF::unpack(&tpf_path)? };
+            println!("Unpacked TPF: {:?} with {} entries", tpf_path.file_name(), tpf.count());
+            textures.extend(tpf.textures);
+        }
+
+        for sblyt_path in sblyts {
+            let (sblyt, _) = unsafe { LayoutBinder::unpack_binder(&sblyt_path)? };
+            println!("Unpacked Layout Binder: {:?} with {} entries", sblyt_path.file_name(), sblyt.count());
+            layouts.extend(sblyt.entries);
         }
     }
 
-    for tpf_path in tpfs {
-        let (mut tpf, _) = unsafe { TPF::unpack(&tpf_path)? };
+    for tex in textures {
+        let tga = tex.to(ImageFormat::TGA)?;
+        std::fs::write(
+            output_dir.join(format!("{}.tga", tex.name)),
+            &tga,
+        )?;
+        println!("Wrote TPFTexture: {:?}.", tex.name);
 
-        for t in tpf.iter() {
-            std::fs::write(
-                output_dir.join(format!("{}.tga", t.name)),
-                t.to_tga()?,
-            )?;
+        if !do_sprites {
+            continue;
+        }
+
+        let layout = layouts
+            .iter()
+            .find(|l| l.stem() == tex.name);
+
+        if let Some(layout) = layout {
+            println!("Found layout for {}! Cropping {} subtextures...", tex.name, layout.entries.len());
+
+            for sub in layout.iter() {
+                let sprite = image::crop_tga(
+                    &tga, 
+                    sub.x.into(), 
+                    sub.y.into(), 
+                    sub.width.into(), 
+                    sub.height.into()
+                );
+                match sprite {
+                    None => {
+                        println!("Failed to crop tga `{}`, skipping!", tex.name);
+                        continue;
+                    },
+                    Some(s) => {
+                        std::fs::write(
+                            output_dir.join(format!("{}.tga", sub.name.replace(".png", ""))),
+                            &s,
+                        )?;
+                    }
+                }
+            }
         }
     }
-
+    
     Ok(())
 }
 

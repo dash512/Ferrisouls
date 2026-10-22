@@ -1,3 +1,33 @@
+//! Metaclass for Shoebox Layouts. This is not really a format unique to Fromsoft, but being able to handle it can be useful.
+//! 
+//! DDS textures within TPFs are typically Atlases. In newer games (SDT/ER/NR/AC6), each TPF has a corresponding SBLYTBND
+//! which contains icon definitions for Atlases of the same names. The layout binder contains `.layout` files which are XML.
+//! 
+//! ## For example:
+//! 
+//! ### My_Binder.tpf:   
+//! * Icons_A.dds 
+//! * Icons_B.dds 
+//! * ..
+//!  
+//! ### My_Layouts.sblytbnd:  
+//! * Icons_A.layout
+//! * Icons_B.layout 
+//! * .. 
+//! 
+//! ### Then, inside Icons_A.layout:  
+//! 
+//! ```
+//! <TextureAtlas imagePath="Icons_A.png">
+//!	    <SubTexture name="Icon_1.png" x="520" y="520" width="126" height="126" half="1"/>
+//!	    <SubTexture name="Icon_2.png" x="1040" y="910" width="126" height="126" half="1"/>
+//!	    <SubTexture name="Icon_3.png" x="1040" y="780" width="126" height="126" half="1"/>
+//!     ...
+//! </TextureAtlas>
+//! ```
+//! 
+//! The game can then slice up the Atlas into a bunch of icons (subtextures) using the information defined in the layout.
+
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
@@ -135,9 +165,8 @@ impl Binder for Layout {
     const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = Subtexture;
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry> {
-        &mut self.entries
-    }
+    fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
 }
 
 impl BinderEntry for Layout {
@@ -311,9 +340,8 @@ impl Binder for LayoutBinder {
     const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = Layout;
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry> {
-        &mut self.entries
-    }
+    fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
 }
 
 impl IO for LayoutBinder {

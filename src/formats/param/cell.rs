@@ -1,3 +1,5 @@
+//! A single param cell.
+
 use std::fmt;
 use std::rc::Rc;
 

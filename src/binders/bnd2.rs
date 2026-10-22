@@ -1,3 +1,7 @@
+//! General purpose container used in games such as:
+//!
+//! MWC, Another Century's Episode 2, Armored Core: FF, AC: 9B, AC: LR. typically psp/ps2 games 
+
 use crate::{binary::{BinaryReader, BinaryWriter, IO}, binders::{Binder, BinderEntry, BinderVersion}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
 use bitflags::{bitflags, parser::to_writer};
 
@@ -496,12 +500,10 @@ impl IO for BND2 {
 
 impl Binder for BND2 {
     const VERSION: BinderVersion = BinderVersion::V2;
-
     type Entry = BND2Entry;
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry> {
-        &mut self.entries
-    }
+    fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
 }
 
 

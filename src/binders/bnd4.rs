@@ -1,3 +1,5 @@
+//! General purpose container used since Dark Souls 2 (2014)
+
 use crate::binary::IO;
 use crate::binders::{Binder, BinderEntry};
 use crate::dcx::{Compress, CompressSettings, DCXType, Decompress};
@@ -484,10 +486,8 @@ impl IO for BND4 {
 
 impl Binder for BND4 {
     const VERSION: BinderVersion = BinderVersion::V1;
-
     type Entry = BND4Entry;
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry> {
-        &mut self.entries
-    }
+    fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
 }

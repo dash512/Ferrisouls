@@ -1,3 +1,6 @@
+//! This module contains functions for finding information relating to steam on your device,
+//! such as paths to installed games.
+
 use std::path::{Path, PathBuf};
 
 use keyvalues_parser::{parse, Value};

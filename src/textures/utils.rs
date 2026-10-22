@@ -1,3 +1,8 @@
+//! Utils for swizzling. Includes Morton/Z-Order implementations as well as per-platform utilities.
+//! 
+//! The latter is essentially a direct port of Shadowth117's [DrSwizzler](https://github.com/Shadowth117/DrSwizzler).
+//! I could not have done this on my own so once again massive thanks and credit to those who came before me.
+
 use std::cmp;
 use crate::textures::dxgi::DxgiFormat;
 

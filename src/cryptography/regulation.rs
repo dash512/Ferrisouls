@@ -1,4 +1,7 @@
-// Basic logic adapted from SoulsFormatsNext and Fromformats
+//! Decryption and Encryption for regulation.bin files.
+//! 
+//! Basic logic adapted from [SoulsFormatsNEXT](https://github.com/soulsmods/SoulsFormatsNEXT/blob/master/SoulsFormats/Utilities/Cryptography/RegulationDecryptor.cs) 
+//! and [FromFormats](https://github.com/LuminaSapphira/fromformats/blob/main/src/regulation.rs)
 
 use std::{fs::File, path::Path};
 use std::io::Read;

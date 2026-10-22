@@ -1,3 +1,5 @@
+//! Generic errors module. TODO PLEASE PLEASE PLEASE UPDATE ME
+
 use std::io;
 use std::num::TryFromIntError;
 

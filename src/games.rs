@@ -1,3 +1,5 @@
+//! This module contains certain important information that differs between different Fromsoftware games.
+
 use std::{ffi::OsStr, path::{Component, Path}};
 
 use hex_literal::hex;

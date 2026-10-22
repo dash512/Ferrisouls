@@ -1,3 +1,5 @@
+//! This module contains some structs for Oodle
+
 use std::ffi::c_void;
 use crate::oodle::enums::{Compressor, CompressionLevel, Profile, Jobify};
 pub type OodleBool = i32;

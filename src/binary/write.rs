@@ -1,4 +1,7 @@
-/// Logic adapted from SoulsFormatsNext and Constrata
+//! A module containing a BinaryWriter which handles writing data.
+//! 
+//! Heavily inspired by [SoulsFormatsNEXT](https://github.com/soulsmods/SoulsFormatsNEXT)
+//! and Grimrukh's [Constrata](https://github.com/Grimrukh/constrata).
 
 use std::{borrow::Cow, fmt::Debug};
 use std::collections::HashMap;

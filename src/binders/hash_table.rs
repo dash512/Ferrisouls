@@ -1,3 +1,5 @@
+//! Hash tables used in certain Binders.
+
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 use crate::binary::{BinaryReader, BinaryWriter, IO};
 

@@ -1,3 +1,21 @@
+//! This module handles any loaded Oodle library, calling it for de/compression and any other available functions.
+//! 
+//! It also contains functions related to accessing Oodle from anywhere in the codebase.
+//! 
+//! Usage:
+//! -----
+//! * `OodleType::find_oodle()` - returns a path to any valid Oodle library by searching steam game directories as well as CWD.
+//! 
+//! * `OodleType::get(path)` - returns a loaded Oodle library from a given path.
+//! 
+//! * `init_oodle(path)` - loads the given path as an Oodle library, then adds it to a OnceLock so it can be used from anywhere.
+//! 
+//! * `oodle_auto()` - attempts to automatically find an Oodle library and then calls `init_oodle()` on it. Errors if not found.
+//! 
+//! * `get_oodle()` - returns an `OodleType` instance from the OnceLock. Throws an error if `init_oodle()` hasn't been run yet.
+//! 
+//! Once you have an `OodleType` instance, you can call {oodle}.compress() or {oodle}.decompress()
+
 
 use std::{ffi::c_void, path::{Path, PathBuf}, sync::OnceLock};
 use libloading::{Library, Symbol};
@@ -545,7 +563,7 @@ impl OodleType {
         }
     }
 
-    pub fn find_oodle() -> Result<PathBuf, String> {
+    pub fn find_oodle() -> Option<PathBuf> {
         const CANDIDATES: [&str; 4] = [
             "oo2core_6_win64.dll",
             "Game/oo2core_6_win64.dll",
@@ -571,7 +589,6 @@ impl OodleType {
                     .into_iter()
                     .find_map(|id| try_find(find_steam_game(id).as_deref()))
             })
-            .ok_or_else(|| "Couldn't find Oodle".to_string())
     }
 
 }
@@ -581,7 +598,10 @@ impl OodleType {
 static OODLE: OnceLock<OodleType> = OnceLock::new();
 
 pub unsafe fn oodle_auto() -> Result<(), String> {
-    let path = unsafe { OodleType::find_oodle()? };
+    let path = unsafe {
+        OodleType::find_oodle()
+            .ok_or_else(|| "Couldn't find Oodle".to_string())?
+    };
     unsafe { init_oodle(path.as_path()) }
 }
 
@@ -590,15 +610,15 @@ pub unsafe fn init_oodle(path: &Path) -> Result<(), String> {
 
     OODLE
         .set(oodle)
-        .map_err(|_| "Oodle has already been initialized.".to_string())
+        .map_err(|_| { println!("Oodle has already been initialized.") });
+    
+    Ok(())
 }
 
 pub fn get_oodle() -> Result<&'static OodleType, DCXError> {
     OODLE
         .get()
-        .ok_or_else(|| {
-            DCXError::custom("Oodle has not been loaded. Call init_oodle() first.")
-        })
+        .ok_or_else(|| { DCXError::custom("Oodle has not been loaded. Call init_oodle() first.") })
 }
 
 

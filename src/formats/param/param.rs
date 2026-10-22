@@ -1,3 +1,7 @@
+//! Handling for params.
+//! 
+//! TODO: more documentation here
+
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -470,9 +474,8 @@ impl Binder for ParamBND {
     const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = Param;
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry> {
-        &mut self.entries
-    }
+    fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
 }
 
 impl MetaBinder for ParamBND {

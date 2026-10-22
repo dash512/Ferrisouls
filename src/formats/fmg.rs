@@ -1,3 +1,11 @@
+//! A module for handling FMGs and binders containing them.
+//! 
+//! FMGs are the text containers used by fromsoft. They are quite simple.
+//! 
+//! * `FMGBinder` - A simple BND4 metaclass that contains a bunch of `FMG`s. Typically a game will have one for items and one for menu text.
+//! * `FMG` - A container for text. Contains a header, encoding information, and then a Vector of `FMGEntry`s.
+//! * `FMGEntry` - A single entry in an `FMG`. It is quite literally just an id and a string of text.
+
 use std::{collections::HashMap, ops::Index, path::Path};
 
 use bitflags::Flags;
@@ -338,9 +346,8 @@ impl Binder for FMG {
     const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = FMGEntry;
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry> {
-        &mut self.entries
-    }
+    fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
 }
 
 impl BinderEntry for FMG {
@@ -391,9 +398,8 @@ impl Binder for FMGBinder {
     const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = FMG;
 
-    fn entries(&mut self) -> &mut Vec<Self::Entry> {
-        &mut self.entries
-    }
+    fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
 }
 
 impl MetaBinder for FMGBinder {

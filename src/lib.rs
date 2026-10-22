@@ -8,3 +8,4 @@ pub mod dcx;
 pub mod binders;
 pub mod cryptography;
 pub mod steam;
+pub mod files;
