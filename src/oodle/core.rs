@@ -4,13 +4,14 @@
 //! 
 //! Usage:
 //! -----
-//! * `OodleType::find_oodle()` - returns a path to any valid Oodle library by searching steam game directories as well as CWD.
 //! 
 //! * `OodleType::get(path)` - returns a loaded Oodle library from a given path.
 //! 
+//! * `find_oodle()` - returns a path to any valid Oodle library by searching steam game directories as well as CWD.
+//! 
 //! * `init_oodle(path)` - loads the given path as an Oodle library, then adds it to a OnceLock so it can be used from anywhere.
 //! 
-//! * `oodle_auto()` - attempts to automatically find an Oodle library and then calls `init_oodle()` on it. Errors if not found.
+//! * `auto_oodle()` - attempts to automatically find an Oodle library and then calls `init_oodle()` on it. Errors if not found.
 //! 
 //! * `get_oodle()` - returns an `OodleType` instance from the OnceLock. Throws an error if `init_oodle()` hasn't been run yet.
 //! 
@@ -496,17 +497,17 @@ pub enum OodleType {
 }
 
 impl OodleType {
-    ///Decompresses `compressed` into `decompressed`. Returns amount of bytes written.
-    pub unsafe fn decompress(&self, compressed: &[u8], decompressed: &mut [u8]) -> Result<usize, DCXError> {
+    ///Decompresses `source` into `output`. Returns amount of bytes written.
+    pub unsafe fn decompress(&self, source: &[u8], output: &mut [u8]) -> Result<usize, DCXError> {
         match self {
             OodleType::O26(inst) => unsafe {
-                inst.decompress(compressed,decompressed) 
+                inst.decompress(source, output) 
             },
             OodleType::O28(inst) => unsafe {
-                inst.decompress(compressed,decompressed) 
+                inst.decompress(source, output) 
             },
             OodleType::O29(inst) => unsafe {
-                inst.decompress(compressed,decompressed)
+                inst.decompress(source, output)
             },
         }
     }
@@ -539,7 +540,7 @@ impl OodleType {
         }
     }
 
-    pub unsafe fn get(path: &Path) -> Result<OodleType, String> {
+    pub unsafe fn load(path: &Path) -> Result<OodleType, String> {
         match path.file_name().and_then(|name| name.to_str()) {
             Some("oo2core_6_win64.dll") => unsafe {
                 Oodle26::load(path)
@@ -563,50 +564,45 @@ impl OodleType {
         }
     }
 
-    pub fn find_oodle() -> Option<PathBuf> {
-        const CANDIDATES: [&str; 4] = [
-            "oo2core_6_win64.dll",
-            "Game/oo2core_6_win64.dll",
-            "Game/oo2core_8_win64.dll",
-            "Game/oo2core_9_win64.dll",
-        ];
-
-        let try_find = |root: Option<&Path>| -> Option<PathBuf> {
-            let root = root?;
-            CANDIDATES.iter().map(|c| root.join(c)).find(|p| p.is_file())
-        };
-
-        let cwd = std::env::current_dir().ok();
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(Path::to_owned));
-
-        try_find(cwd.as_deref())
-            .or_else(|| try_find(exe_dir.as_deref()))
-            .or_else(|| {
-                // er,     nr,     sdt,     ac6
-                [1245620, 2622380, 814380, 1888160]
-                    .into_iter()
-                    .find_map(|id| try_find(find_steam_game(id).as_deref()))
-            })
-    }
-
 }
 
 
 
 static OODLE: OnceLock<OodleType> = OnceLock::new();
 
-pub unsafe fn oodle_auto() -> Result<(), String> {
-    let path = unsafe {
-        OodleType::find_oodle()
-            .ok_or_else(|| "Couldn't find Oodle".to_string())?
+
+///Attempts to find any valid Oodle library on your PC.
+pub fn find_oodle() -> Option<PathBuf> {
+    const CANDIDATES: [&str; 4] = [
+        "oo2core_6_win64.dll",
+        "Game/oo2core_6_win64.dll",
+        "Game/oo2core_8_win64.dll",
+        "Game/oo2core_9_win64.dll",
+    ];
+
+    let try_find = |root: Option<&Path>| -> Option<PathBuf> {
+        let root = root?;
+        CANDIDATES.iter().map(|c| root.join(c)).find(|p| p.is_file())
     };
-    unsafe { init_oodle(path.as_path()) }
+
+    let cwd = std::env::current_dir().ok();
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_owned));
+
+    try_find(cwd.as_deref())
+        .or_else(|| try_find(exe_dir.as_deref()))
+        .or_else(|| {
+            // er,     nr,     sdt,     ac6
+            [1245620, 2622380, 814380, 1888160]
+                .into_iter()
+                .find_map(|id| try_find(find_steam_game(id).as_deref()))
+        })
 }
 
+///Initialize an oodle instance for global use.
 pub unsafe fn init_oodle(path: &Path) -> Result<(), String> {
-    let oodle = unsafe { OodleType::get(path)? };
+    let oodle = unsafe { OodleType::load(path)? };
 
     OODLE
         .set(oodle)
@@ -615,12 +611,56 @@ pub unsafe fn init_oodle(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+///Attempts to automatically find and load an Oodle library.
+pub unsafe fn auto_oodle() -> Result<(), String> {
+    let path = unsafe {
+        find_oodle()
+            .ok_or_else(|| "Couldn't find Oodle".to_string())?
+    };
+    unsafe { init_oodle(path.as_path()) }
+}
+
+///Returns an OodleType instance which can be used for de/compression. Errors if Oodle hasn't been loaded yet.
 pub fn get_oodle() -> Result<&'static OodleType, DCXError> {
     OODLE
         .get()
         .ok_or_else(|| { DCXError::custom("Oodle has not been loaded. Call init_oodle() first.") })
 }
 
+
+///Decompresses `source` into `output`. Returns amount of bytes written.
+pub unsafe fn decompress(source: &[u8], output: &mut [u8]) -> Result<usize, DCXError> {
+    let oodle = match get_oodle() {
+        Ok(oodle) => oodle,
+        Err(_) => {
+            eprintln!("Oodle not loaded, attempting to load automatically...");
+            unsafe {
+                auto_oodle()
+                    .map_err(|e| DCXError::custom(e))?;
+            }
+            get_oodle()?
+        }
+    };
+
+    unsafe { oodle.decompress(source, output) }
+}
+
+///Compresses and returns `input` as per `settings`.
+pub unsafe fn compress(input: &[u8], settings: OodleSettings) -> Result<Vec<u8>, DCXError> {
+    let oodle = match get_oodle() {
+        Ok(oodle) => oodle,
+        Err(_) => {
+            eprintln!("Oodle not loaded, attempting to load automatically...");
+            unsafe {
+                auto_oodle()
+                    .map_err(|e| DCXError::custom(e))?;
+            }
+            get_oodle()?
+        }
+    };
+
+    unsafe { oodle.compress(input, settings) }
+}
 
 
 
@@ -630,6 +670,6 @@ mod tests {
 
     #[test]
     fn find_oo2core() {
-        println!("{:?}", OodleType::find_oodle())
+        println!("{:?}", find_oodle())
     }
 }

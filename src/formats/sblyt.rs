@@ -420,7 +420,7 @@ pub fn get_image_path(game: Game, name: &str, resolution: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::{dcx::{self, CompressSettings}, oodle::{core::init_oodle, structs::OodleSettings}};
+    use crate::{dcx::{self, CompressSettings}, oodle::{init_oodle, OodleSettings}};
     use super::*;
 
     #[test]

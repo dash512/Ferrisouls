@@ -5,8 +5,8 @@ use crate::binders::{Binder, BinderEntry};
 use crate::dcx::{Compress, CompressSettings, DCXType, Decompress};
 use crate::errors::{BinaryReaderError, BinaryWriterError};
 use crate::games::Game;
-use crate::binary::{BinaryReader, BinaryWriter, bytes::VariableUInt};
-use crate::oodle::structs::OodleSettings;
+use crate::binary::{BinaryReader, BinaryWriter, misc::VariableUInt};
+use crate::oodle::OodleSettings;
 use super::{BinderFlags, BinderVersion, EntryFlags, FerrisoulsError, hash_table::BinderHashTable};
 
 

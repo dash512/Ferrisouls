@@ -1,14 +1,18 @@
 //! This module contains the generic `IO` trait which is used for structs that are represented as bytes at any point.
 //! It allows read and write operations with custom logic over how the data structure is handled.
 
-pub mod bytes;
+pub mod misc;
 pub mod read;
 pub mod write;
 
 pub use read::BinaryReader;
 pub use write::BinaryWriter;
+pub use misc::{ByteOrder, VariableUInt};
+
 use zstd::zstd_safe::WriteBuf;
-use crate::{binders::bnd4::BND4, dcx::{Compress, CompressSettings, DCXType, Decompress}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
+use crate::binders::bnd4::BND4;
+use crate::dcx::{Compress, CompressSettings, DCXType, Decompress};
+use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 use std::{borrow::Cow, fs::File, io::{Read, Write}, path::Path};
 
 /// Decompresses `data` if it starts with a DCX/DCP magic, otherwise borrows it unchanged.

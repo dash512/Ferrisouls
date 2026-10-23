@@ -1,7 +1,7 @@
 //! General purpose container used in very old games such as Metal Wolf Chaos
 
 use super::{BinderFlags, EntryFlags};
-use crate::binary::{IO, BinaryReader, BinaryWriter, bytes::VariableUInt};
+use crate::binary::{IO, BinaryReader, BinaryWriter, misc::VariableUInt};
 use crate::binders::{Binder, BinderEntry, BinderVersion};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 

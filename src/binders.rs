@@ -4,10 +4,12 @@ use std::{cmp::Ordering, path::Path};
 
 use bitflags::bitflags;
 use regex::Regex;
-use crate::{binary::{BinaryWriter, IO}, binders::{bnd4::{BND4, BND4EntryHeader, BND4Header}, identifiers::Identifier}, dcx::{self, DCXType}};
-pub use crate::binary::bytes::VariableUInt;
+use crate::binary::{BinaryWriter, IO};
+use crate::binders::{bnd4::{BND4, BND4EntryHeader, BND4Header}, identifiers::Identifier};
+use crate::dcx::{self, DCXType};
+use crate::binary::misc::VariableUInt;
 use crate::binders::bnd4::BND4Entry;
-pub use crate::errors::{FerrisoulsError, BinaryReaderError, BinaryWriterError};
+use crate::errors::{FerrisoulsError, BinaryReaderError, BinaryWriterError};
 
 pub mod bnd;
 pub mod bnd2;
@@ -457,7 +459,7 @@ pub trait MetaEntry: IO {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
-    use crate::{binary::decompress_if_needed, binders::bnd4::BND4, oodle::core::init_oodle};
+    use crate::{binary::decompress_if_needed, binders::bnd4::BND4, oodle::init_oodle};
     use super::*;
 
     #[test]

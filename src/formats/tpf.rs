@@ -3,13 +3,13 @@
 use std::io::Write;
 use std::path::Path;
 
-use crate::binary::{BinaryReader, BinaryWriter, IO, bytes::ByteOrder};
+use crate::binary::{BinaryReader, BinaryWriter, IO, misc::ByteOrder};
 use crate::binders::bnd4::BND4Header;
 use crate::binders::{Binder, BinderEntry, BinderVersion, MetaBinder};
 use crate::dcx::{Compress, CompressSettings, DCXType};
 use crate::dcx::{DCXType::DCP_EDGE, Decompress};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
-use crate::oodle::structs::OodleSettings;
+use crate::oodle::OodleSettings;
 use crate::textures::dds::{DDS, DDSCAPS2, ResourceMisc};
 use crate::textures::headerizer;
 use crate::textures::dxgi::DxgiFormat;
@@ -698,7 +698,7 @@ use super::*;
 
     #[test]
     fn write_texture() {
-        unsafe {crate::oodle::core::oodle_auto()};
+        unsafe {crate::oodle::auto_oodle()};
 
         let (tpf, dt) = unsafe {
             TPF::unpack(Path::new("tests/common.tpf.dcx")).unwrap()
@@ -710,7 +710,7 @@ use super::*;
 
     #[test]
     fn inspct_tpf() {
-        unsafe {crate::oodle::core::oodle_auto()};
+        unsafe {crate::oodle::auto_oodle()};
 
         let (tpf, dt) = unsafe {
             TPF::unpack(Path::new("tests/common.tpf.dcx")).unwrap()

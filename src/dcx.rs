@@ -12,19 +12,17 @@ use flate2::read::{DeflateDecoder, ZlibDecoder};
 use flate2::write::{DeflateEncoder, ZlibEncoder};
 use flate2::Compression as ZCompression;
 
-use crate::dcx;
 use crate::errors::{BinaryReaderError, DCXError, FerrisoulsError};
-use crate::oodle::core::{Oodle, Oodle26, Oodle28, Oodle29, OodleType, get_oodle};
-use crate::oodle::structs::OodleSettings;
+use crate::oodle::{self, Oodle, Oodle26, Oodle28, Oodle29, OodleType, OodleSettings};
 use crate::binary::{BinaryReader, BinaryWriter, IO};
-use crate::binary::bytes::ByteOrder;
-use header_structs::*;
+use crate::binary::misc::ByteOrder;
+
+pub use header_structs::*;
 
 
 pub mod header_structs {
     use crate::errors::BinaryWriterError;
-
-use super::*;
+    use super::*;
      
      ///Info struct containing the variable fields in a DCX file's header
     pub struct DCXVersionInfo {
@@ -1113,10 +1111,9 @@ impl Decompress {
 
                 let compressed = reader.read_bytes(compressed_size)?;
 
-                let oodle = get_oodle()?;
                 let mut decompressed = vec![0u8; decompressed_size];
 
-                unsafe { oodle.decompress(&compressed, &mut decompressed)?; }
+                unsafe { oodle::decompress(&compressed, &mut decompressed)?; }
 
                 if decompressed.len() != decompressed_size {
                     return Err(DCXError::invalid_data(
@@ -1418,8 +1415,7 @@ impl Compress {
             }
 
             CompressSettings::Oodle(osettings) => {
-                let oodle = get_oodle()?;
-                unsafe { oodle.compress(raw_buffer, *osettings)? }
+                unsafe { oodle::compress(raw_buffer, *osettings)? }
             }
 
             CompressSettings::DFLT(_, lvl)
@@ -1492,9 +1488,7 @@ impl Compress {
 
 #[cfg(test)]
 mod tests {
-    use crate::oodle::core::init_oodle;
-
-use super::*;
+    use super::*;
 
     #[test]
     fn get_dcxtype_from_file() -> Result<(), FerrisoulsError> {
@@ -1523,7 +1517,7 @@ use super::*;
 
     #[test]
     fn test_compress() {
-        unsafe { init_oodle(Path::new("tests/oo2core_6_win64.dll")); }
+        unsafe { oodle::init_oodle(Path::new("tests/oo2core_6_win64.dll")); }
 
         let file = Path::new("tests/01_common.sblytbnd.dcx");
         let mut f = File::open(file).unwrap();

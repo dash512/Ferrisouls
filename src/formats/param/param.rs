@@ -19,6 +19,7 @@ use crate::formats::param::row::{self, Row};
 use crate::formats::param::paramdef::Paramdef;
 use crate::formats::param::ParamdefMatchOptions;
 
+
 bitflags! {
     /// First set of flags indicating file format; highly speculative.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -490,7 +491,7 @@ impl MetaBinder for ParamBND {
 
 #[cfg(test)]
 mod tests {
-    use crate::{dcx::CompressSettings, oodle::{core::init_oodle, structs::OodleSettings}};
+    use crate::{dcx::CompressSettings, oodle::{init_oodle, OodleSettings}};
     use std::path::Path;
     use super::*;
 

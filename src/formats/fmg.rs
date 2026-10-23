@@ -429,7 +429,7 @@ impl std::fmt::Display for FMGBinder {
 mod tests {
     use regex::Regex;
 
-use crate::{dcx::CompressSettings, oodle::{core::init_oodle, structs::OodleSettings}};
+    use crate::{dcx::CompressSettings, oodle::{init_oodle, OodleSettings}};
     use super::*;
 
     #[test]

@@ -39,7 +39,7 @@ pub unsafe fn dump_icons(tpf_path: &Path, sblyt_path: &Path, output_dir: &Path) 
     use crate::textures::dds::DDS;
 
     //try to automatically find and load oo2core
-    unsafe { crate::oodle::core::oodle_auto().unwrap(); }
+    unsafe { crate::oodle::auto_oodle().unwrap(); }
 
     //create output location if it doesn't xist
     std::fs::create_dir_all(output_dir)?;
@@ -103,7 +103,7 @@ pub unsafe fn dump_atlases(tpf_path: &Path, output_dir: &Path) -> Result<(), cra
     use crate::formats::tpf::TPF;
     use crate::textures::image::ImageFormat;
 
-    unsafe { crate::oodle::core::oodle_auto().unwrap(); }
+    unsafe { crate::oodle::auto_oodle().unwrap(); }
 
     std::fs::create_dir_all(output_dir)?;
     let (tpf, _) = unsafe { TPF::unpack(tpf_path)? };
@@ -132,7 +132,7 @@ pub unsafe fn dump_tgas(menu_path: &Path, output_dir: &Path, do_sprites: bool) -
     use crate::textures::image::{self, ImageFormat};
     use crate::files;
 
-    unsafe { crate::oodle::core::oodle_auto().unwrap(); }
+    unsafe { crate::oodle::auto_oodle().unwrap(); }
 
     std::fs::create_dir_all(output_dir)?;
 

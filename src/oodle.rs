@@ -1,6 +1,11 @@
 //! Parent module for anything related to RAD Game Tools' Oodle compression format.
 
-pub mod core;
-pub mod bindings;
+mod core;
+mod bindings;
+mod structs;
+
 pub mod enums;
-pub mod structs;
+
+pub use core::*;
+pub use bindings::*;
+pub use structs::*;
