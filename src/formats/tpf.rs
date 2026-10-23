@@ -248,7 +248,10 @@ impl TPFTexture {
         })
     }
 
-    ///Writes self texture to a specified path.
+    ///Writes self texture to a specified path in a given format.
+    /// 
+    ///`ImageFormat::DDS(_)` re-encodes and thus if you want to write the raw dds contained in this `TPFTexture`,
+    /// use `texture.to_dds()?.to_file(path)`.
     pub fn save_as(&self, path: &Path, format: ImageFormat) -> Result<(), FerrisoulsError> {
         let mut dds = self.to_dds()?;
         dds.to_image()?.save(path, format)

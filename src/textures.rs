@@ -33,7 +33,7 @@ pub mod image;
 /// 
 /// This function loads BND4s, which are likely in KRAK format and thus need oo2core loaded. Safety cannot be guaranteed for 
 /// an external library.
-pub unsafe fn dump_icons(tpf_path: &Path, sblyt_path: &Path, output_dir: &Path) -> Result<(), crate::errors::FerrisoulsError> {
+pub unsafe fn dump_icons_dds(tpf_path: &Path, sblyt_path: &Path, output_dir: &Path) -> Result<(), crate::errors::FerrisoulsError> {
     use crate::{binary::IO, binders::{Binder, MetaBinder}};
     use crate::formats::{tpf::TPF, sblyt::{Layout, LayoutBinder}};
     use crate::textures::dds::DDS;
@@ -92,7 +92,7 @@ pub unsafe fn dump_icons(tpf_path: &Path, sblyt_path: &Path, output_dir: &Path) 
 }
 
 
-///Exports all Atlases in a given TPF to the output directory as `.tga` files.
+///Exports all Atlases in a given TPF to the output directory as `.dds` files.
 /// 
 /// ## Safety:
 /// 
@@ -109,7 +109,7 @@ pub unsafe fn dump_atlases(tpf_path: &Path, output_dir: &Path) -> Result<(), cra
     let (tpf, _) = unsafe { TPF::unpack(tpf_path)? };
 
     for tex in tpf.into_iter() {
-        tex.save_as(&output_dir.join(tex.name.clone()).with_extension("tga"), ImageFormat::TGA);
+        tex.to_dds()?.to_file(&output_dir.join(tex.name.clone()).with_extension("dds"))?;
     }
     Ok(())
 }
@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn test_icon_dumper() {
         unsafe {
-            dump_icons(
+            dump_icons_dds(
                 &Path::new("tests/01_common.tpf.dcx"),
                 &Path::new("tests/01_common.sblytbnd.dcx"),
                 &Path::new(r"C:\Users\lstr\Downloads\Textures")
