@@ -615,7 +615,7 @@ pub unsafe fn init_oodle(path: &Path) -> Result<(), String> {
 pub unsafe fn auto_oodle() -> Result<(), String> {
     let path = unsafe {
         find_oodle()
-            .ok_or_else(|| "Couldn't find Oodle".to_string())?
+            .ok_or_else(|| "Couldn't find Oodle. Please load it yourself with `init_oodle()`.".to_string())?
     };
     unsafe { init_oodle(path.as_path()) }
 }
