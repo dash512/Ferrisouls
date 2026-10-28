@@ -500,18 +500,30 @@ pub mod header_structs {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DCXType {
     Unknown = -1, // could not be detected
-    Null = 0, // no compression
-    Zlib = 1, // not really DCX but supported
-    DCP_EDGE = 2, // DCP header, chunked deflate compression. Used in ACE:R TPFs.
-    DCP_DFLT = 3, // DCP header, deflate compression. Used in DeS test maps.
-    DCX_EDGE = 4, // DCX header, chunked deflate compression. Primarily used in DeS.
+    ///No compression
+    Null = 0,
+    ///Not DCX, supported anyway.
+    Zlib = 1,
+    /// DCP header, chunked deflate compression. Used in ACE:R TPFs.
+    DCP_EDGE = 2, 
+    /// DCP header, deflate compression. Used in DeS test maps.
+    DCP_DFLT = 3, 
+    /// DCX header, chunked deflate compression. Primarily used in DeS.
+    DCX_EDGE = 4, 
+    /// DCX header, deflate compression. Primarily used in DS1 and DS2.
     DCX_DFLT_10000_24_9 = 5, // DCX header, deflate compression. Primarily used in DS1 and DS2.
-    DCX_DFLT_10000_44_9 = 6, // DCX header, deflate compression. Primarily used in BB and DS3.
-    DCX_DFLT_11000_44_8 = 7, // DCX header, deflate compression. Used for the backup regulation in DS3 save files.
-    DCX_DFLT_11000_44_9 = 8, // DCX header, deflate compression. Used in Sekiro.
-    DCX_DFLT_11000_44_9_15 = 9, // DCX header, deflate compression. Used in old ER regulation.
-    DCX_KRAK = 10, // DCX header, Oodle compression. Used in Sekiro and Elden Ring.
-    DCX_ZSTD = 11, // ZSTD compression. Used in new ER regulation.
+    /// DCX header, deflate compression. Primarily used in BB and DS3.
+    DCX_DFLT_10000_44_9 = 6,
+    /// DCX header, deflate compression. Used for the backup regulation in DS3 save files.
+    DCX_DFLT_11000_44_8 = 7, 
+    /// DCX header, deflate compression. Used in Sekiro.
+    DCX_DFLT_11000_44_9 = 8, 
+    /// DCX header, deflate compression. Used in old ER regulation.
+    DCX_DFLT_11000_44_9_15 = 9, 
+    /// DCX header, Oodle compression. Used in Sekiro and Elden Ring.
+    DCX_KRAK = 10, 
+    /// ZSTD compression. Used in new ER regulation.
+    DCX_ZSTD = 11, 
 }
 
 impl DCXType {
@@ -801,14 +813,21 @@ impl DCXType {
 
 #[derive(Debug)]
 pub enum CompressSettings {
+    ///Oodle (oo2core) compression from RAD game tools. Requires external Oodle DLL loaded.
     Oodle(OodleSettings),
-    DFLT(DCXType, u32), // zlib compression level
-    ZSTD(i32), // zstd compression level
-    DCPDFLT(u32), // zlib compression level
+    ///Zlib compression. Requires `DCXType` to distinguish variants, and compression level in the range `0u32..9u32`
+    DFLT(DCXType, u32),
+    ///Zstd compression. Requires compression level in the range `1i32..22i32`
+    ZSTD(i32),
+    ///Deflate (Zlib) compression with DCP header. Requires compression level in the range `0u32..9u32`
+    DCPDFLT(u32),
+    ///Chunked deflate (Zlib) compression with a DCP header.
     DCPEDGE,
+    ///Chunked deflate (Zlib) compression with a DCX header.
     DCXEDGE,
+    ///No compression.
     Null,
-    Unknown,
+    Unknown
 }
 
 impl CompressSettings {
@@ -831,6 +850,15 @@ pub struct Decompress;
 pub struct Compress;
 
 impl Decompress {
+    ///Decompresses raw bytes with Zlib. Expects no DCX magic or header. 
+    pub fn zlib(stored: &[u8]) -> Result<Vec<u8>, BinaryReaderError> {
+        let mut data = Vec::new();
+        ZlibDecoder::new(stored)
+            .read_to_end(&mut data)
+            .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
+        Ok(data) 
+    }
+
     ///Special decompression handling for DCX_EDGE type.
     pub fn dcx_edge(mut reader: BinaryReader, header: DCXHeader) -> Result<Vec<u8>, FerrisoulsError> {
         let dca_start = reader.position() as u32;
@@ -1183,6 +1211,15 @@ impl Decompress {
 }
 
 impl Compress {
+    ///Compresses raw bytes with Zlib. Does not include DCX magic or header. 
+    pub fn zlib(raw_buffer: &[u8]) -> Result<Vec<u8>, FerrisoulsError> {
+        let mut encoder = ZlibEncoder::new(Vec::new(), ZCompression::best());
+        encoder.write_all(raw_buffer)
+            .map_err(|e| FerrisoulsError::Custom(e.to_string()))?;
+        encoder.finish()
+            .map_err(|e| FerrisoulsError::Custom(e.to_string()))
+    }
+
     ///Special compression handling for DCX_EDGE type.
     pub fn dcx_edge(raw_buffer: &[u8]) -> Result<Vec<u8>, FerrisoulsError> {
         let decompressed_size = raw_buffer.len();

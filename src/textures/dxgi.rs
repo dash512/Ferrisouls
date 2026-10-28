@@ -5,6 +5,8 @@
 //! [Dxgi Enum](https://learn.microsoft.com/en-us/windows/win32/api/dxgiformat/ne-dxgiformat-dxgi_format)
 //! 
 //! [Block Compression Info](https://learn.microsoft.com/en-us/windows/win32/direct3d11/texture-block-compression-in-direct3d-11)
+//! 
+//! [More About BCn Formats](https://www.reedbeta.com/blog/understanding-bcn-texture-compression-formats)
 
 use crate::errors::FerrisoulsError::{self, FormatNotFound};
 
