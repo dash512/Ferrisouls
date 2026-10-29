@@ -420,18 +420,16 @@ impl IO for BND4 {
         Ok(Self { header, entries })
     }  
 
-    fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
-        let mut writer = BinaryWriter::default();
-
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.big_endian = self.header.big_endian;
 
         self.header.entry_count = self.entries.len() as u32; // modifying entries at all may make this incosnistent
 
-        self.header.to_writer(&mut writer)?;
+        self.header.to_writer(writer)?;
 
         // Entry headers
         for (index, entry) in self.entries.iter().enumerate() {
-            entry.header.to_writer(&mut writer, self.header.flags, self.header.bit_big_endian, index)?;
+            entry.header.to_writer(writer, self.header.flags, self.header.bit_big_endian, index)?;
         }
 
         // Entry names
@@ -465,7 +463,7 @@ impl IO for BND4 {
                 .collect::<Result<_, _>>()?;
 
             let mut hash_table = BinderHashTable::from_names(&names)?;
-            hash_table.to_writer(&mut writer)?;
+            hash_table.to_writer(writer)?;
 
         } else {
             writer.fill::<u64>("HashTableOffset".to_string(), 0)?;
@@ -476,10 +474,10 @@ impl IO for BND4 {
 
         // File data
         for (index, entry) in self.entries.iter().enumerate() {
-            entry.to_writer(&mut writer, self.header.flags, index)?;
+            entry.to_writer(writer, self.header.flags, index)?;
         }
 
-        Ok(writer)
+        Ok(())
     }
 
 }

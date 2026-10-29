@@ -4,7 +4,7 @@ use std::{cmp::Ordering, path::Path};
 
 use bitflags::bitflags;
 use regex::Regex;
-use crate::binary::{BinaryWriter, IO};
+use crate::binary::{BinaryReader, BinaryWriter, IO};
 use crate::binders::{bnd4::{BND4, BND4EntryHeader, BND4Header}, identifiers::Identifier};
 use crate::dcx::{self, DCXType};
 use crate::binary::misc::VariableUInt;
@@ -26,6 +26,28 @@ pub enum BinderVersion {
     V3, // used generally in games pre DS2 (2014)
     V4, // all games after DS2 (2014)
     VARIABLE //could be any of the above
+}
+
+impl BinderVersion {
+    pub fn from_u8(int: u8) -> Self {
+        match int {
+            1 => Self::V1,
+            2 => Self::V2,
+            3 => Self::V3,
+            4 => Self::V4,
+            _=> Self::VARIABLE
+        }
+    }
+
+    pub fn to_u8(&self) -> Result<u8, FerrisoulsError> {
+        Ok(match self {
+            Self::V1 => 1,
+            Self::V2 => 2,
+            Self::V3 => 3, 
+            Self::V4 => 4,
+            Self::VARIABLE => { return Err(FerrisoulsError::custom("Variable BinderVersion has no integer form."))}
+        })
+    }
 }
 
 
@@ -382,79 +404,6 @@ pub trait BinderEntry {
 }
 
 
-///Structs that implement this trait are typically identical to a generic BND4.
-/// 
-///This trait allows for converting between an intermediate representation for "special" binders.
-pub trait MetaBinder: IO + Binder {
-    fn from_bnd4(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self;
-    fn header(&self) -> BND4Header;
-    
-    ///Decompresses self as a BND4 from `path`. Also returns detected `DCXType`
-    unsafe fn unpack_binder(path: &Path) -> Result<(Self, DCXType), BinaryReaderError>
-    where
-    Self: Sized,
-    Self::Entry: MetaEntry
-    {
-        let (mut binder, dcxtype) = unsafe { BND4::unpack(path)?};
-        let entries: Vec<Self::Entry> = binder.iter_mut()
-            .map(|e| Self::Entry::from_entry(e))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok((Self::from_bnd4(binder.header.clone(), entries), dcxtype))
-    }
-
-    ///Packs list of `Self` into a new BND4 with a provided header.
-    /// 
-    ///You may then want to call `to_file` on the resulting binder to compress and write.
-    unsafe fn pack_binder(&mut self) -> Result<BND4, BinaryWriterError> where Self::Entry: MetaEntry {
-        let entries = self.entries_mut().iter_mut()
-            .map(|e| e.to_entry())
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(BND4 {
-            header: self.header(),
-            entries
-        })
-    }
-
-}
-
-///Structs that implement this trait are "meta-entries" of a generic BND4.
-/// 
-///They are typically just simple `BND4Entry`s, but have an intermediate representation when a part of their binder.
-pub trait MetaEntry: IO {
-
-    fn name(&self) -> Option<String>;
-    fn header(&self) -> Option<BND4EntryHeader>;
-
-    fn set_name(&mut self, name: &Option<String>);
-    fn set_header(&mut self, header: &BND4EntryHeader);
-
-    fn from_entry(entry: &mut BND4Entry) -> Result<Self, BinaryReaderError> where Self: Sized {
-        let mut new = Self::from_bytes(&entry.data)?;
-        new.set_name(&entry.name);
-        new.set_header(&entry.header);
-        Ok(new)
-    }
-
-    fn to_entry(&mut self) -> Result<BND4Entry, BinaryWriterError> {
-        let mut writer = BinaryWriter::new(true, false);
-        self.to_writer(&mut writer)?;
-
-        let header = self.header()
-            .ok_or_else(|| BinaryWriterError::custom("MetaEntry has no BND4 entry header; cannot repack"))?;
-
-        Ok(BND4Entry {
-            name: self.name(),
-            header,
-            data: writer.into_inner(),
-        })
-    }
-
-}
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -479,7 +428,7 @@ mod tests {
         let (bytes, _) = unsafe { decompress_if_needed(&data) }.unwrap();
         println!("original: unicode={:02X} flags={:02X} extended={:02X}", bytes[0x30], bytes[0x31], bytes[0x32]);
 
-        let (mut bnd, _) = unsafe { BND4::unpack(Path::new("tests/01_common.sblytbnd.dcx")) }.unwrap();
+        let (mut bnd, _) = unsafe { BND4::read(Path::new("tests/01_common.sblytbnd.dcx")) }.unwrap();
         let out = bnd.to_bytes().unwrap();
         println!("rewritten: unicode={:02X} flags={:02X} extended={:02X}", out[0x30], out[0x31], out[0x32]);
     }

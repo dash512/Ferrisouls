@@ -11,7 +11,6 @@ use std::{collections::HashMap, ops::Index, path::Path};
 use bitflags::Flags;
 
 use crate::binary::{BinaryReader, BinaryWriter, IO};
-use crate::binders::{MetaBinder, MetaEntry};
 use crate::binders::bnd4::BND4EntryHeader;
 use crate::binders::{Binder, BinderEntry, BinderFlags, BinderVersion, bnd4::{BND4, BND4Entry, BND4Header}};
 use crate::dcx::DCXType;
@@ -96,8 +95,8 @@ impl FMG {
         self.entries.sort_by(|a, b| a.id.cmp(&b.id));
     }
 
-    //write strings to offset, reusing them for ids that have duplicate text if `reuse_offsets` is true.
-    fn write_strings(&mut self, writer: &mut BinaryWriter, reuse_offsets: bool) -> Result<(), BinaryWriterError> {
+    //Write strings to offset, reusing them for ids that have duplicate text if `reuse_offsets` is true.
+    pub fn write_strings(&mut self, writer: &mut BinaryWriter, reuse_offsets: bool) -> Result<(), BinaryWriterError> {
         if !reuse_offsets {
             for (idx,e) in self.entries.iter().enumerate() {
                 if e.text.len() > 0 {
@@ -144,6 +143,26 @@ impl FMG {
         }
     }
 
+    pub fn from_entry(entry: &BND4Entry) -> Result<Self, BinaryReaderError> {
+        let mut new = Self::from_bytes(&entry.data)?;
+        new.name = entry.name.clone();
+        new.header = Some(entry.header);
+        Ok(new)
+    }
+
+    pub fn to_entry(&mut self) -> Result<BND4Entry, BinaryWriterError> {
+        let mut writer = BinaryWriter::new(true, false);
+        self.to_writer(&mut writer)?;
+
+        let header = self.header
+            .ok_or_else(|| BinaryWriterError::custom("Entry has no BND4 entry header; cannot repack"))?;
+
+        Ok(BND4Entry {
+            name: self.name.clone(),
+            header,
+            data: writer.into_inner(),
+        })
+    }
 }
 
 impl IO for FMG {
@@ -327,21 +346,6 @@ impl IO for FMG {
 
 }
 
-impl MetaEntry for FMG {
-    fn header(&self) -> Option<BND4EntryHeader> {
-        self.header.clone()
-    }
-    fn name(&self) -> Option<String> {
-        self.name.clone()
-    }
-    fn set_header(&mut self, header: &BND4EntryHeader) {
-        self.header = Some(header.clone())
-    }
-    fn set_name(&mut self, name: &Option<String>) {
-        self.name = name.clone()
-    }
-}
-
 impl Binder for FMG {
     const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = FMGEntry;
@@ -368,8 +372,6 @@ impl std::fmt::Display for FMG {
 }
 
 
-
-
 #[derive(Debug)]
 pub struct FMGBinder {
     header: BND4Header,
@@ -378,16 +380,25 @@ pub struct FMGBinder {
 
 impl IO for FMGBinder {
     fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
-        let mut bnd = BND4::from_reader(reader)?;
-        Self::from_binder(&mut bnd)
-            .map_err(|e| BinaryReaderError::Custom(e.to_string()))
+        let bnd = BND4::from_reader(reader)?;
+        let entries: Vec<<Self as Binder>::Entry> = bnd.iter()
+            .map(|e| <Self as Binder>::Entry::from_entry(e))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            header: bnd.header,
+            entries
+        })
     }
 
     fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
         let mut writer = BinaryWriter::default();
-
-        let mut bnd = unsafe { self.pack() }
-            .map_err(|e| BinaryWriterError::Custom(e.to_string()))?;
+        let mut bnd = BND4 {
+            header: self.header.clone(),
+            entries: self.iter_mut()
+                .map(|e| e.to_entry())
+                .collect::<Result<Vec<_>, _>>()?
+        };
         bnd.to_writer(&mut writer)?;
 
         Ok(writer)
@@ -400,16 +411,6 @@ impl Binder for FMGBinder {
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
     fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
-}
-
-impl MetaBinder for FMGBinder {
-    fn header(&self) -> BND4Header {
-        self.header.clone()
-    }
-
-    fn from_bnd4(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
-        Self { header, entries }
-    }
 }
 
 impl std::fmt::Display for FMGBinder {
@@ -429,15 +430,15 @@ impl std::fmt::Display for FMGBinder {
 mod tests {
     use regex::Regex;
 
-    use crate::{dcx::CompressSettings, oodle::{init_oodle, OodleSettings}};
+    use crate::{dcx::CompressSettings, oodle::OodleSettings};
     use super::*;
 
     #[test]
     fn test_msg() {
-        unsafe {init_oodle(Path::new("tests/oo2core_6_win64.dll"));}
+        unsafe { crate::oodle::auto_oodle(); }
 
         let (mut fmg, _) = unsafe { 
-            FMGBinder::unpack_binder(Path::new("tests/item.msgbnd.dcx")).unwrap() 
+            FMGBinder::read(Path::new("tests/item.msgbnd.dcx")).unwrap() 
         };
 
         let re = Regex::new("(?i)Turtle|Tortoise").unwrap();
@@ -445,13 +446,14 @@ mod tests {
             file.execute_regex(
                 &re,
                 |e| &e.text,
-                |e| { e.text = re.replace_all(&e.text, "Dog").to_string() }
+                |e| {
+                    e.text = re.replace_all(&e.text, "Dog").to_string() 
+                }
             );
         }
 
-        let mut binder = unsafe { fmg.pack_binder().unwrap() };
         unsafe {
-            binder.to_file(
+            fmg.write(
                 Path::new(r"C:/Users/lstr/Downloads/test.msgbnd.dcx"),
                 CompressSettings::Oodle(OodleSettings::KRAK)
             ).unwrap();

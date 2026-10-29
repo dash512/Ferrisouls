@@ -266,20 +266,19 @@ impl IO for BND3 {
         )
     }
 
-    fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
-        let mut writer = BinaryWriter::default();
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.big_endian = self.header.big_endian;
 
         self.header.entry_count = self.entries.len() as i32;
         self.header.entry_headers_end = 0;
 
-        self.header.to_writer(&mut writer)?;
+        self.header.to_writer(writer)?;
 
         let header_start = writer.position();
 
         for entry in self.entries.iter_mut() {
             entry.header.compressed_size = entry.data.len() as u32;
-            entry.header.to_writer(&mut writer, &self.header)?;
+            entry.header.to_writer(writer, &self.header)?;
         }
 
         for entry in self.entries.iter_mut() {
@@ -294,7 +293,7 @@ impl IO for BND3 {
 
         let _ = header_start;
 
-        Ok(writer)
+        Ok(())
     }
 
 }

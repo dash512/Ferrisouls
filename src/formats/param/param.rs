@@ -10,7 +10,7 @@ use std::rc::Rc;
 use bitflags::bitflags;
 
 use crate::binary::{BinaryReader, BinaryWriter, IO, decompress_if_needed};
-use crate::binders::{Binder, BinderEntry, BinderVersion, MetaBinder, MetaEntry};
+use crate::binders::{Binder, BinderEntry, BinderVersion};
 use crate::binders::bnd4::{BND4, BND4Entry, BND4EntryHeader, BND4Header};
 use crate::dcx::{Compress, CompressSettings, DCXType};
 use crate::errors::{BinaryReaderError, BinaryWriterError};
@@ -410,6 +410,26 @@ impl Param {
         self.rows.iter_mut().find(|row| row.id == id)
     }
 
+    pub fn from_entry(entry: &BND4Entry) -> Result<Self, BinaryReaderError> {
+        let mut new = Self::from_bytes(&entry.data)?;
+        new.name = entry.name.clone();
+        new.header = Some(entry.header);
+        Ok(new)
+    }
+
+    pub fn to_entry(&mut self) -> Result<BND4Entry, BinaryWriterError> {
+        let mut writer = BinaryWriter::new(true, false);
+        self.to_writer(&mut writer)?;
+
+        let header = self.header
+            .ok_or_else(|| BinaryWriterError::custom("Entry has no BND4 entry header; cannot repack"))?;
+
+        Ok(BND4Entry {
+            name: self.name.clone(),
+            header,
+            data: writer.into_inner(),
+        })
+    }
 }
 
 impl BinderEntry for Param {
@@ -420,24 +440,6 @@ impl BinderEntry for Param {
     }
 }
 
-impl MetaEntry for Param {
-    fn header(&self) -> Option<BND4EntryHeader> {
-        self.header.clone()
-    }
-
-    fn name(&self) -> Option<String> {
-        self.name.clone()
-    }
-
-    fn set_header(&mut self, header: &BND4EntryHeader) {
-        self.header = Some(header.clone());
-    }
-
-    fn set_name(&mut self, name: &Option<String>) {
-        self.name = name.clone();
-    }
-}
-
 impl<'a> std::fmt::Display for Param {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} v{} [{}]", self.param_type, self.paramdef_data_version, self.rows.len())
@@ -445,25 +447,32 @@ impl<'a> std::fmt::Display for Param {
 }
 
 
-
 pub struct ParamBND {
     header: BND4Header,
     entries: Vec<Param>
 }
 
-
 impl IO for ParamBND {
     fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
-        let mut bnd = BND4::from_reader(reader)?;
-        Self::from_binder(&mut bnd)
-            .map_err(|e| BinaryReaderError::Custom(e.to_string()))
+        let bnd = BND4::from_reader(reader)?;
+        let entries: Vec<<Self as Binder>::Entry> = bnd.iter()
+            .map(|e| <Self as Binder>::Entry::from_entry(e))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            header: bnd.header,
+            entries
+        })
     }
 
     fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
         let mut writer = BinaryWriter::default();
-
-        let mut bnd = unsafe { self.pack() }
-            .map_err(|e| BinaryWriterError::Custom(e.to_string()))?;
+        let mut bnd = BND4 {
+            header: self.header.clone(),
+            entries: self.iter_mut()
+                .map(|e| e.to_entry())
+                .collect::<Result<Vec<_>, _>>()?
+        };
         bnd.to_writer(&mut writer)?;
 
         Ok(writer)
@@ -479,15 +488,6 @@ impl Binder for ParamBND {
     fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.entries }
 }
 
-impl MetaBinder for ParamBND {
-    fn header(&self) -> BND4Header {
-        self.header.clone()
-    }
-
-    fn from_bnd4(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
-        Self { header, entries }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -499,7 +499,7 @@ mod tests {
     fn load_params() {
         unsafe {init_oodle(Path::new("tests/oo2core_6_win64.dll"));}
 
-        let (mut fmg, dcx_type) = unsafe { ParamBND::unpack_binder(Path::new("tests/gameparam.parambnd.dcx")).unwrap() };
+        let (mut fmg, dcx_type) = unsafe { ParamBND::read(Path::new("tests/gameparam.parambnd.dcx")).unwrap() };
 
         for p in fmg.iter_mut() {
             println!("{}", p.param_type)

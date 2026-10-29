@@ -406,21 +406,18 @@ impl SplitIO for BXF4 {
         Ok(Self { header, entries })
     }
  
-    fn into_writers(&mut self) -> Result<(BinaryWriter, BinaryWriter), BinaryWriterError> {
-        let mut bhd = BinaryWriter::default();
-        let mut bdt = BinaryWriter::default();
- 
+    fn to_writers(&mut self, bhd: &mut BinaryWriter, bdt: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         bhd.big_endian = self.header.big_endian;
         bdt.big_endian = self.header.big_endian;
  
         self.header.entry_count = self.entries.len() as u32; // modifying entries at all may make this inconsistent
  
-        BDF4Header::from_bhf(&self.header).to_writer(&mut bdt)?;
-        self.header.to_writer(&mut bhd)?;
+        BDF4Header::from_bhf(&self.header).to_writer(bdt)?;
+        self.header.to_writer(bhd)?;
  
         // Entry headers
         for (index, entry) in self.entries.iter().enumerate() {
-            entry.header.to_writer(&mut bhd, self.header.flags, self.header.bit_big_endian, index)?;
+            entry.header.to_writer(bhd, self.header.flags, self.header.bit_big_endian, index)?;
         }
  
         // Entry names
@@ -452,17 +449,17 @@ impl SplitIO for BXF4 {
                 .collect::<Result<_, _>>()?;
  
             let mut hash_table = BinderHashTable::from_names(&names)?;
-            hash_table.to_writer(&mut bhd)?;
+            hash_table.to_writer(bhd)?;
         } else {
             bhd.fill::<u64>("HashTableOffset".to_string(), 0)?;
         }
  
         // File data goes in the BDT, sizes/offsets are filled back into the BHD
         for (index, entry) in self.entries.iter().enumerate() {
-            Self::write_entry(entry, &mut bhd, &mut bdt, self.header.flags, index)?;
+            Self::write_entry(entry, bhd, bdt, self.header.flags, index)?;
         }
  
-        Ok((bhd, bdt))
+        Ok(())
     }
 }
 
@@ -485,7 +482,7 @@ mod tests {
         unsafe { crate::oodle::auto_oodle(); }
 
         unsafe {
-        let bxf = BXF4::unpack(
+        let bxf = BXF4::read(
             Path::new("tests/00_solo_l.tpfbhd"),
             Path::new("tests/00_solo_l.tpfbdt"),
         ).unwrap();

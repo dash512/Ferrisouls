@@ -34,7 +34,7 @@ pub mod image;
 /// This function loads BND4s, which are likely in KRAK format and thus need oo2core loaded. Safety cannot be guaranteed for 
 /// an external library.
 pub unsafe fn dump_icons_dds(tpf_path: &Path, sblyt_path: &Path, output_dir: &Path) -> Result<(), crate::errors::FerrisoulsError> {
-    use crate::{binary::IO, binders::{Binder, MetaBinder}};
+    use crate::{binary::IO, binders::Binder};
     use crate::formats::{tpf::TPF, sblyt::{Layout, LayoutBinder}};
     use crate::textures::dds::DDS;
 
@@ -45,10 +45,10 @@ pub unsafe fn dump_icons_dds(tpf_path: &Path, sblyt_path: &Path, output_dir: &Pa
     std::fs::create_dir_all(output_dir)?;
 
     //Decompress and unpack binders
-    let (mut sblyt, _) = unsafe { LayoutBinder::unpack_binder(sblyt_path)? };
-    let (tpf, _) = unsafe { TPF::unpack(tpf_path)? };
+    let (mut sblyt, _) = unsafe { LayoutBinder::read(sblyt_path)? };
+    let (tpf, _) = unsafe { TPF::read(tpf_path)? };
 
-    for tex in tpf.into_iter() {
+    for tex in tpf.iter() {
         let mut dds = tex.to_dds()?;
 
         //find a layout matching the texture name. use l.stem because e.g:
@@ -106,9 +106,9 @@ pub unsafe fn dump_atlases(tpf_path: &Path, output_dir: &Path) -> Result<(), cra
     unsafe { crate::oodle::auto_oodle().unwrap(); }
 
     std::fs::create_dir_all(output_dir)?;
-    let (tpf, _) = unsafe { TPF::unpack(tpf_path)? };
+    let (tpf, _) = unsafe { TPF::read(tpf_path)? };
 
-    for tex in tpf.into_iter() {
+    for tex in tpf.iter() {
         tex.to_dds()?.to_file(&output_dir.join(tex.name.clone()).with_extension("dds"))?;
     }
     Ok(())
@@ -127,7 +127,7 @@ pub unsafe fn dump_atlases(tpf_path: &Path, output_dir: &Path) -> Result<(), cra
 /// This function loads BND4s, which are likely in KRAK format and thus need oo2core loaded. Safety cannot be guaranteed for 
 /// an external library.
 pub unsafe fn dump_tgas(menu_path: &Path, output_dir: &Path, do_sprites: bool) -> Result<(), crate::errors::FerrisoulsError> {
-    use crate::{binary::IO, binders::{Binder, MetaBinder}};
+    use crate::{binary::IO, binders::Binder};
     use crate::formats::{tpf::{TPF, TPFTexture}, sblyt::{Layout, LayoutBinder}};
     use crate::textures::image::{self, ImageFormat};
     use crate::files;
@@ -150,13 +150,13 @@ pub unsafe fn dump_tgas(menu_path: &Path, output_dir: &Path, do_sprites: bool) -
 
     {
         for tpf_path in tpfs {
-            let (tpf, _) = unsafe { TPF::unpack(&tpf_path)? };
+            let (tpf, _) = unsafe { TPF::read(&tpf_path)? };
             println!("Unpacked TPF: {:?} with {} entries", tpf_path.file_name(), tpf.count());
             textures.extend(tpf.textures);
         }
 
         for sblyt_path in sblyts {
-            let (sblyt, _) = unsafe { LayoutBinder::unpack_binder(&sblyt_path)? };
+            let (sblyt, _) = unsafe { LayoutBinder::read(&sblyt_path)? };
             println!("Unpacked Layout Binder: {:?} with {} entries", sblyt_path.file_name(), sblyt.count());
             layouts.extend(sblyt.entries);
         }
@@ -215,6 +215,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "intensive"]
     fn test_dumper() {
         unsafe {
             dump_atlases(
@@ -225,6 +226,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "intensive"]
     fn test_icon_dumper() {
         unsafe {
             dump_icons_dds(

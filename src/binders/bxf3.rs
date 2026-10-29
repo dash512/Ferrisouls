@@ -337,22 +337,19 @@ impl SplitIO for BXF3 {
         Ok(Self { header, entries })
     }
 
-    fn into_writers(&mut self) -> Result<(BinaryWriter, BinaryWriter), BinaryWriterError> {
-        let mut bhd = BinaryWriter::default();
-        let mut bdt = BinaryWriter::default();
-
+    fn to_writers(&mut self, bhd: &mut BinaryWriter, bdt: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         let big_endian = self.header.big_endian || self.header.flags.force_big_endian();
         bhd.big_endian = big_endian;
         bdt.big_endian = big_endian;
 
         self.header.entry_count = self.entries.len() as u32; // modifying entries at all may make this inconsistent
 
-        BDF3Header::from_bhf(&self.header).to_writer(&mut bdt)?;
-        self.header.to_writer(&mut bhd)?;
+        BDF3Header::from_bhf(&self.header).to_writer(bdt)?;
+        self.header.to_writer(bhd)?;
 
         //write entry headers first
         for (index, entry) in self.entries.iter().enumerate() {
-            entry.header.to_writer(&mut bhd, self.header.flags, self.header.bit_big_endian, index)?;
+            entry.header.to_writer(bhd, self.header.flags, self.header.bit_big_endian, index)?;
         }
 
         //entry names (always Shift-JIS)
@@ -365,10 +362,10 @@ impl SplitIO for BXF3 {
 
         //file data goes in the BDT, sizes/offsets are filled back into the BHD
         for (index, entry) in self.entries.iter().enumerate() {
-            Self::write_entry(entry, &mut bhd, &mut bdt, self.header.flags, index)?;
+            Self::write_entry(entry, bhd, bdt, self.header.flags, index)?;
         }
 
-        Ok((bhd, bdt))
+        Ok(())
     }
 }
 
@@ -391,7 +388,7 @@ mod tests {
         unsafe { crate::oodle::auto_oodle(); }
 
         unsafe {
-        let bxf = BXF3::unpack(
+        let bxf = BXF3::read(
             Path::new("tests/GI_EnvM_m11.tpfbhd"),
             Path::new("tests/GI_EnvM_m11.tpfbdt"),
         ).unwrap();

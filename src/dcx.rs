@@ -349,7 +349,7 @@ pub mod header_structs {
             Self::from_reader(&mut BinaryReader::new(buffer, true, false))
         }
 
-        fn from_path(path: &Path) -> Result<Self, BinaryReaderError> {
+        fn from_file(path: &Path) -> Result<Self, BinaryReaderError> {
             let mut file = File::open(path)?;
 
             let mut buffer = [0u8; 68];
@@ -1529,9 +1529,9 @@ mod tests {
 
     #[test]
     fn get_dcxtype_from_file() -> Result<(), FerrisoulsError> {
-        let path = Path::new(r"...\tests\01_common.sblytbnd.dcx");
+        let path = Path::new("tests/01_common.sblytbnd.dcx");
         let r = DCXType::detect_from_file(path)?;
-        let h = DCXHeader::from_path(path)?;
+        let h = DCXHeader::from_file(path)?;
         println!("{:?}\n{}", r, h);
         return Ok(());
         /*
@@ -1554,15 +1554,12 @@ mod tests {
 
     #[test]
     fn test_compress() {
-        unsafe { oodle::init_oodle(Path::new("tests/oo2core_6_win64.dll")); }
+        unsafe { oodle::auto_oodle(); }
 
-        let file = Path::new("tests/01_common.sblytbnd.dcx");
-        let mut f = File::open(file).unwrap();
-        let mut empty = Vec::new();
-        f.read_to_end(&mut empty);
-        println!("Successfully read {:?} bytes", empty.len());
+        let bytes = std::fs::read("tests/01_common.sblytbnd.dcx").unwrap();
+        println!("Successfully read {:?} bytes", bytes.len());
 
-        let result = unsafe { Decompress::file(file).unwrap() };
+        let result = unsafe { Decompress::raw(&bytes).unwrap() };
         println!("Successfully decompressed {:?} bytes", result.0.len());
 
         let compsettings = CompressSettings::Oodle(OodleSettings::KRAK);

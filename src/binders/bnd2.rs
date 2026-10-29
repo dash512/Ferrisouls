@@ -446,9 +446,7 @@ impl IO for BND2 {
         Ok(bnd)
     }
 
-    fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
-        let mut writer = BinaryWriter::new(false, false);
-
+    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.write_bytes(b"BND\0")?;
 
         writer.write_u8(self.header_info_flags.bits())?;
@@ -477,23 +475,23 @@ impl IO for BND2 {
 
         //entry headers
         for (index, entry) in self.entries.iter().enumerate() {
-            entry.header.to_writer(&mut writer, self.path_mode, self.entry_flags, index)?;
+            entry.header.to_writer(writer, self.path_mode, self.entry_flags, index)?;
         }
 
         if self.entry_flags.contains(BND2EntryFlags::NAME_OFFSET) {
-            self.write_file_names(&mut writer)?;
+            self.write_file_names(writer)?;
         } else {
             writer.fill::<i32>("baseDirOffset".to_string(), 0)?;
         }
 
         //write file data
         for (index, entry) in self.entries.iter_mut().enumerate() {
-            entry.to_writer(&mut writer, self.alignment_size, index)?;
+            entry.to_writer(writer, self.alignment_size, index)?;
         }
 
         writer.fill::<i32>("fileSize".to_string(), writer.position() as i32)?;
 
-        Ok(writer)
+        Ok(())
     }
 
 }

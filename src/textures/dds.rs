@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn test_dds() {
-        let dds = DDS::from_path(Path::new("tests/SB_Icon_04.dds")).unwrap();
+        let dds = DDS::from_file(Path::new("tests/SB_Icon_04.dds")).unwrap();
         println!("{:?}", dds)
     }
 }

@@ -35,7 +35,7 @@ use std::path::Path;
 use std::fmt::Write;
 
 use crate::binary::{BinaryReader, BinaryWriter, IO};
-use crate::binders::{MetaBinder, MetaEntry};
+use crate::binders::BinderFlags;
 use crate::binders::bnd4::{BND4Entry, BND4EntryHeader, BND4Header};
 use crate::binders::{Binder, BinderEntry, BinderVersion, bnd4::BND4};
 use crate::dcx::DCXType;
@@ -136,7 +136,6 @@ impl Subtexture {
         }
     }
 }
-
 
 
 ///Represents a `.layout` file inside a BND4
@@ -259,33 +258,12 @@ impl Layout {
         )
     }
 
-}
-
-impl IO for Layout {} // NOT IMPLEMENTED! Only used for MetaEntry
-
-impl MetaEntry for Layout {
-    fn header(&self) -> Option<BND4EntryHeader> {
-        Some(self._header.clone())
-    }
-
-    fn name(&self) -> Option<String> {
-        Some(self.name.clone())
-    }
-
-    fn set_header(&mut self, header: &BND4EntryHeader) {
-        self._header = header.clone()
-    }
-
-    fn set_name(&mut self, name: &Option<String>) {
-        self.name = name.clone().unwrap()
-    }
-
-    fn from_entry(entry: &mut BND4Entry) -> Result<Self, BinaryReaderError> {
+    pub fn from_entry(entry: &BND4Entry) -> Result<Self, BinaryReaderError> {
         Self::from_bytes(entry.name.clone(), entry.header.clone(), &entry.data)
     }
 
     ///Recompiles self as xml data and returns a `BND4Entry`.
-    fn to_entry(&mut self) -> Result<BND4Entry, BinaryWriterError> {
+    pub fn to_entry(&mut self) -> Result<BND4Entry, BinaryWriterError> {
         let mut w = XmlWriter::new(Options {
             indent: Indent::Tabs,
             ..Options::default()
@@ -346,29 +324,28 @@ impl Binder for LayoutBinder {
 
 impl IO for LayoutBinder {
     fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
-        let mut bnd = BND4::from_reader(reader)?;
-        Self::from_binder(&mut bnd)
-            .map_err(|e| BinaryReaderError::Custom(e.to_string()))
+        let bnd = BND4::from_reader(reader)?;
+        let entries: Vec<<Self as Binder>::Entry> = bnd.iter()
+            .map(|e| <Self as Binder>::Entry::from_entry(e))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            header: bnd.header,
+            entries
+        })
     }
 
     fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
         let mut writer = BinaryWriter::default();
-
-        let mut bnd = unsafe { self.pack() }
-            .map_err(|e| BinaryWriterError::Custom(e.to_string()))?;
+        let mut bnd = BND4 {
+            header: self.header.clone(),
+            entries: self.iter_mut()
+                .map(|e| e.to_entry())
+                .collect::<Result<Vec<_>, _>>()?
+        };
         bnd.to_writer(&mut writer)?;
 
         Ok(writer)
-    }
-}
-
-impl MetaBinder for LayoutBinder {
-    fn header(&self) -> BND4Header {
-        self.header.clone()
-    }
-
-    fn from_bnd4(header: BND4Header, entries: Vec<<Self as Binder>::Entry>) -> Self {
-        Self { header, entries }
     }
 }
 
@@ -420,16 +397,14 @@ pub fn get_image_path(game: Game, name: &str, resolution: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::{dcx::{self, CompressSettings}, oodle::{init_oodle, OodleSettings}};
+    use crate::{dcx::{self, CompressSettings}, oodle::OodleSettings};
     use super::*;
 
     #[test]
     fn full_layout_test() {
-        unsafe { init_oodle(Path::new("tests/oo2core_6_win64.dll")) };
+        unsafe { crate::oodle::auto_oodle() };
 
-        let (mut lyts, _) = unsafe { LayoutBinder::unpack_binder(
-            Path::new("tests/01_common.sblytbnd.dcx")
-        ).unwrap() };
+        let (mut lyts, _) = unsafe { LayoutBinder::read(Path::new("tests/01_common.sblytbnd.dcx")).unwrap() };
 
         for l in lyts.iter_mut() {
             for s in l.iter_mut() {
@@ -437,9 +412,8 @@ mod tests {
             }
         }
 
-        let mut binder = unsafe { lyts.pack_binder().unwrap() };
         unsafe {
-        binder.to_file(
+        lyts.write(
             Path::new(r"C:/Users/lstr/Downloads/test.sblytbnd.dcx"),
             CompressSettings::Oodle(OodleSettings::KRAK)
         ).unwrap();

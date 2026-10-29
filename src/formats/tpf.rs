@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::binary::{BinaryReader, BinaryWriter, IO, misc::ByteOrder};
 use crate::binders::bnd4::BND4Header;
-use crate::binders::{Binder, BinderEntry, BinderVersion, MetaBinder};
+use crate::binders::{Binder, BinderEntry, BinderVersion};
 use crate::dcx::{Compress, CompressSettings, DCXType};
 use crate::dcx::{DCXType::DCP_EDGE, Decompress};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
@@ -663,21 +663,12 @@ impl Binder for TPF {
     fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.textures }
 }
 
-impl<'a> IntoIterator for &'a TPF {
-    type Item = &'a TPFTexture;
-    type IntoIter = std::slice::Iter<'a, TPFTexture>;
- 
-    fn into_iter(self) -> Self::IntoIter {
-        self.textures.iter()
-    }
-}
-
 impl std::fmt::Display for TPF {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TPF[Platform: {:?} | Flags: {:?} | Encoding: {:?}] {{\n", 
             self.platform, self.tpf_flags, self.encoding
         );
-        for t in self.into_iter() {
+        for t in self.iter() {
             write!(f, "    ");
             t.fmt(f);
         }
@@ -704,7 +695,7 @@ use super::*;
         unsafe {crate::oodle::auto_oodle()};
 
         let (tpf, dt) = unsafe {
-            TPF::unpack(Path::new("tests/common.tpf.dcx")).unwrap()
+            TPF::read(Path::new("tests/common.tpf.dcx")).unwrap()
         };
 
         tpf.textures[0].save_as(Path::new("C:/Users/lstr/Downloads/test.dds"), ImageFormat::DDS(DxgiFormat::BC7_UNORM)).unwrap();
@@ -716,7 +707,7 @@ use super::*;
         unsafe {crate::oodle::auto_oodle()};
 
         let (tpf, dt) = unsafe {
-            TPF::unpack(Path::new("tests/common.tpf.dcx")).unwrap()
+            TPF::read(Path::new("tests/common.tpf.dcx")).unwrap()
         };
 
         println!("{}", tpf);
