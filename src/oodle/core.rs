@@ -627,6 +627,13 @@ pub fn get_oodle() -> Result<&'static OodleType, DCXError> {
         .ok_or_else(|| { DCXError::custom("Oodle has not been loaded. Call init_oodle() first.") })
 }
 
+///Returns `true` if an Oodle instance is currently loaded.
+pub fn is_oodle_loaded() -> bool {
+    OODLE
+        .get()
+        .is_some()
+}
+
 
 ///Decompresses `source` into `output`. Returns amount of bytes written.
 pub unsafe fn decompress(source: &[u8], output: &mut [u8]) -> Result<usize, DCXError> {
