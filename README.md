@@ -80,6 +80,7 @@ Huge thanks and respects to everyone who worked on these projects:
  - [SoulsFormats](https://github.com/JKAnderson/SoulsFormats) - Essentially the building blocks modding was based on.
  - [SoulsFormatsNEXT](https://github.com/soulsmods/SoulsFormatsNEXT) - The community continuation of the aforementioned project. Essentially all code in this repo is at least partially based off this.
  - [soulstruct](https://github.com/Grimrukh/soulstruct) - A python library for game modification. Inspired this project as well as my interest in tooling in general :)
+ - [DrSwizzler](https://github.com/Shadowth117/DrSwizzler) - A library for de/swizzling image data for consoles. A lot of its code is ported nigh one-to-one here so I have to say massive thankies to the goat Shadowth117.
  - [fstools-rs](https://github.com/soulsmods/fstools-rs) - An alternative to this project. No code was used but I want to show appreciation for it regardless.
  - [Paramdex](https://github.com/soulsmods/Paramdex) - Assorted data required to read Params.
  - [UXM](https://github.com/JKAnderson/UXM) + [Nuxe](https://github.com/JKAnderson/Nuxe) - Game data unpackers that are required before modding is even possible.
