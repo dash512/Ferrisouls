@@ -1,4 +1,10 @@
-![Ferrisouls Icon](https://github.com/dash512/Ferrisouls/blob/res/Assets/icon.png?raw=true)
+<p align="center">
+  <img src="res/Assets/icon.png"/>
+</p>
+
+<p align="center">
+<a href="#features">Features</a> /|\ <a href="#supported-formats">Formats</a> /|\ <a href="#acknowledgements">Credits</a>
+</p>
   
 ## Features:
  - Oodle implementation for decompressing files (supports versions 6, 8 and 9)
@@ -16,6 +22,7 @@
  - ⚠️ - Under Construction/Planned
  - ❌ - Not Supported Yet
  - ⁉️ - What the hell is that/I need to do research before adding this
+  
 | Format | Supported |
 |---|---|
 | ACB | ⁉️ |
@@ -60,6 +67,7 @@
 | RMB | ⚠️ |
 | TAE3 | ⚠️ |
 | TPF | ✅ |
+  
 *For more information, see [FORMATS](https://github.com/soulsmods/SoulsFormatsNEXT/blob/master/FORMATS.md)
 
 
