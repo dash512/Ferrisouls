@@ -272,14 +272,14 @@ pub mod identifiers {
 /// 
 /// Expects a BinderVersion, and an `Entry` type corresponding to the entries/files stored in this Binder.
 /// 
-//TODO: add more required fns to allow more runtime modification to the Binder itself as well as its entries
 pub trait Binder {
     const VERSION: BinderVersion; // BinderVersion
     type Entry: BinderEntry; 
 
     fn entries(&self) -> &Vec<Self::Entry>;
-
     fn entries_mut(&mut self) -> &mut Vec<Self::Entry>;
+
+    // Proxies
 
     fn get(&self, index: usize) -> Option<&<Self as Binder>::Entry> {
         self.entries().get(index)
@@ -289,7 +289,7 @@ pub trait Binder {
         self.entries_mut().get_mut(index)
     }
 
-    fn add(&mut self, entry: Self::Entry) {
+    fn push(&mut self, entry: Self::Entry) {
         self.entries_mut().push(entry);
     }
     
@@ -317,61 +317,13 @@ pub trait Binder {
         self.entries().len()
     }
 
-    fn iter(&self) -> std::slice::Iter<'_, <Self as Binder>::Entry> {
-        self.entries().iter()
-    }
-
-    fn iter_mut(&mut self) -> std::slice::IterMut<'_, <Self as Binder>::Entry> {
-        self.entries_mut().iter_mut()
-    }
-
-    fn find(&self, id: <<Self as Binder>::Entry as BinderEntry>::Identifier) -> Option<&Self::Entry> {
-        self.entries()
-            .iter()
-            .find(
-                |&e|
-                *e.identity() == id
-            )
-    }
-
-    fn find_mut(&mut self, id: <<Self as Binder>::Entry as BinderEntry>::Identifier) -> Option<&mut Self::Entry> {
-        self.entries_mut()
-            .iter_mut()
-            .find(
-                |e|
-                *e.identity() == id
-            )
-    }
-
-    ///Find all entries in self whose `identity` matches a given Regex `pattern`, applying `f` to each.
-    /// 
-    ///If `Self::Entry::Identifier` is an `Option`, None values will never match.
-    fn execute_regex<F, I>(&mut self, pattern: &Regex, identity: I, mut f: F)
-    where
-        I: Fn(&Self::Entry) -> &str,
-        F: FnMut(&mut Self::Entry),
-    {
-        for entry in self.entries_mut().iter_mut() {
-            if pattern.is_match(identity(entry)) {
-                f(entry);
-            }
-        }
-    }
-
-    /*TODO: a way to modify existing entries by finding it by a given entry's id and replacing it in-place
-    fn modify(&mut self, entry: <<Self as Binder>::Entry) -> Option<&Self::Entry> {
-        match self.find(*entry.identity()) {
-            Some(e) => 
-        }
-    }
-    */
-
-    fn insert(&mut self, index: usize, entry: Self::Entry) -> &mut <Self as Binder>::Entry {
-        self.entries_mut().insert_mut(index, entry)
-    }
-
     fn is_empty(&self) -> bool {
         self.entries().is_empty()
+    }
+
+    fn insert(&mut self, index: usize, entry: Self::Entry) -> &mut <Self as Binder>::Entry {
+        self.entries_mut()
+            .insert_mut(index, entry)
     }
 
     fn append(&mut self, other: &mut Vec<Self::Entry>) {
@@ -380,6 +332,110 @@ pub trait Binder {
 
     fn extend(&mut self, other: Vec<Self::Entry>) {
         self.entries_mut().extend(other)
+    }
+
+    fn iter(&self) -> std::slice::Iter<'_, <Self as Binder>::Entry> {
+        self.entries().iter()
+    }
+
+    fn iter_mut(&mut self) -> std::slice::IterMut<'_, <Self as Binder>::Entry> {
+        self.entries_mut().iter_mut()
+    }
+
+    // Automation
+
+    ///Finds and returns the first entry in self whose `identity()` matches `id`.
+    fn find(&self, id: <<Self as Binder>::Entry as BinderEntry>::Identifier) -> Option<&Self::Entry> {
+        self.iter()
+            .find(|e| *e.identity() == id)
+    }
+
+    ///Finds and returns the first entry in self whose `identity()` matches `id`. Mutable.
+    fn find_mut(&mut self, id: <<Self as Binder>::Entry as BinderEntry>::Identifier) -> Option<&mut Self::Entry> {
+        self.iter_mut()
+            .find(|e| *e.identity() == id)
+    }
+
+    ///Collects all entries in self upon which `f(e)` returns `true`.
+    fn filter<F>(&self, f: F) -> Vec<&Self::Entry>
+    where
+        F: Fn(&Self::Entry) -> bool
+    {
+        self.iter()
+            .filter(|e| f(*e))
+            .collect()
+    }
+
+    ///Collects all entries in self upon which `f(e)` returns `true`. Mutable.
+    fn filter_mut<F>(&mut self, f: F) -> Vec<&mut Self::Entry>
+    where 
+        F: Fn(&Self::Entry) -> bool
+    {
+        self.iter_mut()
+            .filter(|e| f(*e))
+            .collect()
+    }
+
+    //Replaces the entry at `index` with the given `entry`.
+    fn replace(&mut self, index: usize, entry: Self::Entry) -> &mut <Self as Binder>::Entry {
+        self.remove(index);
+        self.insert(index, entry)
+    }
+
+    ///Finds all entries in self upon which `predicate(entry)` returns `true`, applying `f` to each.
+    /// 
+    /// ## Example:
+    /// ```rs
+    /// let (mut binder, _) = unsafe { LayoutBinder::read(Path::new("01_common.sblytbnd.dcx")).unwrap() };
+    /// let re = Regex::new("(?i)Turtle|Tortoise").unwrap();
+    /// for layout in binder.iter_mut() {
+    ///     layout.execute(
+    ///         //match if any dimension is NOT divisible by 4
+    ///         |sub| sub.dimensions().iter().any(|d| d%4 != 0),
+    ///         //round all dimensions to the nearest 4
+    ///         |sub| *sub = sub.round_to(4)
+    ///     );
+    /// }
+    /// ```
+    /// In actuality, `round_to()` doesn't care whether any values are valid or not, so the check 
+    /// is not needed here. It's just to serve as an explanation for how the function, well, functions!
+    fn execute<C, F>(&mut self, predicate: C, mut f: F)
+    where
+        C: Fn(&Self::Entry) -> bool,
+        F: FnMut(&mut Self::Entry)
+    {
+        self.filter_mut(|e| predicate(e))
+            .iter_mut()
+            .for_each(|mut e| f(*e))
+    }
+
+    ///Find all entries in self whose `identity()` matches a given Regex `pattern`, applying `f` to each.
+    /// 
+    ///If `Self::Entry::Identifier` is an `Option`, `None` values will never match.
+    /// 
+    /// ## Example:
+    /// ```rs
+    /// let (mut binder, _) = unsafe { FMGBinder::read(Path::new("item.msgbnd.dcx")).unwrap() };
+    /// let re = Regex::new("(?i)Turtle|Tortoise").unwrap();
+    /// for fmg in binder.iter_mut() {
+    ///     fmg.execute_regex(
+    ///         &re, //regex pattern
+    ///         |entry: &mut FMGEntry| {
+    ///             entry.text = re.replace_all(&e.text, "Dog").to_string() 
+    ///         } //replace all tortoise/turtle text instances with "Dog"
+    ///     );
+    /// }
+    /// ```
+    fn execute_regex<F>(&mut self, pattern: &Regex, mut f: F)
+    where
+        F: FnMut(&mut Self::Entry),
+    {
+        self.filter_mut(|e| {
+            pattern.is_match(
+                &e.identity().as_string()
+            )
+        }).iter_mut()
+          .for_each(|e| f(*e))
     }
 
 }

@@ -47,7 +47,7 @@ use xmlwriter::{Indent, Options, XmlWriter};
 
 
 ///Represents a single SubTexture entry in a layout XML
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Subtexture {
     pub name: String,
 
@@ -135,17 +135,15 @@ impl Subtexture {
             ..*self
         }
     }
+
+    ///Returns self [x, y, w, h]
+    pub fn dimensions(&self) -> [u16;4] {
+        [self.x, self.y, self.width, self.height]
+    }
 }
 
 
 ///Represents a `.layout` file inside a BND4
-/// 
-///IMPORTANT:
-/// 
-///`Layout` does not properly implement `IO`, but the trait is required for `MetaEntry`'s defaults.
-///This struct's `to_entry` and `from_entry` implement them differently, so `IO` isn't needed.
-/// 
-///Attempting to call any `IO` functions on this struct will panic with `"not implemented"`.
 #[derive(Debug, Default)]
 pub struct Layout {
     pub _header: BND4EntryHeader, // used when repacking the layout

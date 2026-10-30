@@ -445,7 +445,6 @@ mod tests {
         for file in fmg.iter_mut() {
             file.execute_regex(
                 &re,
-                |e| &e.text,
                 |e| {
                     e.text = re.replace_all(&e.text, "Dog").to_string() 
                 }
