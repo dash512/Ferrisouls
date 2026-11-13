@@ -81,14 +81,12 @@ impl Subtexture {
         
         let original_width = node.attribute("originalWidth")
             .map(|x| x.trim()
-                .parse::<u16>()
-                .map_err(|e| BinaryReaderError::Custom(e.to_string())))
+                .parse::<u16>())
             .transpose()?;  
 
         let original_height: Option<u16> = node.attribute("originalHeight")
             .map(|x| x.trim()
-                .parse::<u16>()
-                .map_err(|e| BinaryReaderError::Custom(e.to_string())))
+                .parse::<u16>())
             .transpose()?;
         
         Ok(
@@ -185,20 +183,16 @@ impl Layout {
     }
 
     pub fn from_bytes(name: Option<String>, header: BND4EntryHeader, data: &[u8]) -> Result<Self, BinaryReaderError> {
-        let raw_xml = str::from_utf8(data)
-            .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
-
-        let doc = Document::parse(&raw_xml)
-            .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
-
+        let raw_xml = str::from_utf8(data)?;
+        let doc = Document::parse(&raw_xml)?;
         let root = doc.root_element();
 
         if !root.has_tag_name("TextureAtlas") {
-            return Err(BinaryReaderError::custom("root element is not <TextureAtlas>"));
+            return Err("root element is not <TextureAtlas>".into());
         }
 
         let image_path = root.attribute("imagePath")
-            .ok_or_else(|| BinaryReaderError::custom("TextureAtlas doesn't contain an imagePath."))?
+            .ok_or_else(|| "TextureAtlas doesn't contain an imagePath.")?
             .to_string();
 
         let subs = root.children()
@@ -209,10 +203,10 @@ impl Layout {
         match root.attribute("width") {
             Some(w) => {
                 let width = root.attribute("width")
-                    .map(|w| w.trim().parse::<u16>().map_err(|e| BinaryReaderError::Custom(e.to_string())))
+                    .map(|w| w.trim().parse::<u16>())
                     .transpose()?;
                 let height = root.attribute("height")
-                    .map(|h| h.trim().parse::<u16>().map_err(|e| BinaryReaderError::Custom(e.to_string())))
+                    .map(|h| h.trim().parse::<u16>())
                     .transpose()?;
                 let root_dimensions = width.is_some() || height.is_some();
 
@@ -366,17 +360,11 @@ where
     T::Err: std::fmt::Display,
 {
 
-    let attr = node.attribute(name).ok_or_else(|| {
-        BinaryReaderError::custom(format!(
-            "<{}> is missing attribute '{}'",
-            node.tag_name().name(),
-            name
-        ))
+    let attr = node.attribute(name).ok_or_else(|| -> BinaryReaderError {
+        format!("<{}> is missing attribute '{}'", node.tag_name().name(), name).into()
     })?;
 
-    attr.trim().parse::<T>().map_err(|e| {
-        BinaryReaderError::custom(format!("invalid '{}' attribute: {}", name, e))
-    })
+    attr.trim().parse::<T>().map_err(|e| format!("invalid '{}' attribute: {}", name, e).into())
 }
 
 

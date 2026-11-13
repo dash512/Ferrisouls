@@ -93,7 +93,7 @@ impl IO for BHF3Header {
 
         let bit_big_endian_check = reader.read_boolean()?;
         if bit_big_endian_check != bit_big_endian {
-            return Err(BinaryReaderError::custom("BHF3 bit big-endian flag read inconsistently"));
+            return Err("BHF3 bit big-endian flag read inconsistently".into());
         }
         reader.assert(b'\0')?;
 
@@ -198,9 +198,7 @@ impl BXF3EntryHeader {
         writer.reserve::<u32>(format!("FileDataOffset{}", index))?;
 
         if format.has_ids() {
-            writer.write_i32(self.entry_id.ok_or_else(||
-                BinaryWriterError::Custom(format!("BXF3 entry {} requires an ID.", index))
-            )?)?;
+            writer.write_i32(self.entry_id.ok_or_else(|| format!("BXF3 entry {} requires an ID.", index))?)?;
         }
 
         if format.has_names() {
@@ -271,14 +269,13 @@ impl BXF3 {
         bdt.step_out()?;
 
         let data = if header.flags.is_compressed() {
-            let (data, _) = unsafe { Decompress::raw(&stored_data) }
-                .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
+            let (data, _) = unsafe { Decompress::raw(&stored_data) }?;
 
             let expected_size = header.uncompressed_size
-                .ok_or_else(|| BinaryReaderError::custom("Compressed BXF3 entry has no uncompressed size"))?;
+                .ok_or_else(|| "Compressed BXF3 entry has no uncompressed size")?;
 
             if data.len() != expected_size as usize {
-                return Err(BinaryReaderError::Custom(format!("Expected entry size of {}, got {}", expected_size, data.len())));
+                return Err(format!("Expected entry size of {}, got {}", expected_size, data.len()).into());
             }
 
             data
@@ -304,7 +301,7 @@ impl BXF3 {
         let stored_data = if entry.header.flags.is_compressed() {
             let compset = CompressSettings::DFLT(DCXType::DCX_DFLT_10000_24_9, 7u32);
             unsafe { Compress::raw(&entry.data, &compset) }
-                .map_err(|e| BinaryWriterError::Custom(e.to_string()))?
+                ?
         } else {
             entry.data.clone()
         };

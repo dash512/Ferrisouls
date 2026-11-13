@@ -103,12 +103,9 @@ impl Row {
         let data_offset = self.data_offset;
         let check_orphaned_bits = |bit_offset: i32, bit_value: u64, pos: i64| -> Result<(), FerrisoulsError> {
             if bit_offset != -1 && (bit_value >> (bit_offset as u32)) != 0 {
-                return Err(FerrisoulsError::Custom(format!(
+                return Err(format!(
                     "Invalid paramdef {}; bits would be lost before +0x{:X} in row {}.",
-                    paramdef.param_type,
-                    pos - data_offset,
-                    id
-                )));
+                    paramdef.param_type, pos - data_offset, id).into());
             }
             Ok(())
         };
@@ -152,15 +149,11 @@ impl Row {
                             DefType::Dummy8 => {
                                 CellValue::Bytes(reader.read_bytes(field.array_length as usize)?)
                             }
-                            _ => {
-                                return Err(FerrisoulsError::Custom(format!(
-                                    "Unexpected type in bitfield handling: {t:?}"
-                                )))
-                            }
+                            _ => { return Err(format!("Unexpected type in bitfield handling: {t:?}").into()) }
                         });
                     }
                 }
-                t => return Err(FerrisoulsError::Custom(format!("Unsupported field type: {t:?}"))),
+                t => return Err(format!("Unsupported field type: {t:?}").into()),
             }
 
             let value = match value {
@@ -184,21 +177,16 @@ impl Row {
                             16 => reader.read_u16()? as u64,
                             32 => reader.read_u32()? as u64,
                             _ => {
-                                return Err(FerrisoulsError::Custom(format!(
-                                    "Unexpected bit limit in bitfield handling: {bit_limit}"
-                                )))
+                                return Err(format!("Unexpected bit limit in bitfield handling: {bit_limit}").into())
                             }
                         };
                     }
 
                     if field.bit_size == 0 {
-                        return Err(FerrisoulsError::custom("Bit size 0 is not supported."));
+                        return Err("Bit size 0 is not supported.".into());
                     }
                     if field.bit_size > bit_limit {
-                        return Err(FerrisoulsError::Custom(format!(
-                            "Bit size {} is too large to fit in type {ty:?}.",
-                            field.bit_size
-                        )));
+                        return Err(format!("Bit size {} is too large to fit in type {ty:?}.", field.bit_size).into());
                     }
 
                     let left_shift = (BIT_VALUE_SIZE - field.bit_size - bit_offset) as u32;
@@ -222,9 +210,7 @@ impl Row {
                         DefType::U32 => CellValue::U32(shifted as u32),
                         DefType::Dummy8 => CellValue::U8(shifted as u8),
                         _ => {
-                            return Err(FerrisoulsError::Custom(format!(
-                                "Unexpected type in bitfield handling: {ty:?}"
-                            )))
+                            return Err(format!("Unexpected type in bitfield handling: {ty:?}").into())
                         }
                     }
                 }
@@ -300,11 +286,7 @@ impl Row {
                             DefType::S32 => writer.write_i32(value.as_s32()?)?,
                             DefType::U32 => writer.write_u32(value.as_u32()?)?,
                             DefType::Dummy8 => writer.write_bytes(&value.as_bytes()?)?,
-                            _ => {
-                                return Err(FerrisoulsError::Custom(format!(
-                                    "Unexpected type in bitfield handling: {t:?}"
-                                )))
-                            }
+                            _ => { return Err(format!("Unexpected type in bitfield handling: {t:?}").into()) }
                         }
                     } else {
                         if bit_offset == -1 {
@@ -321,10 +303,7 @@ impl Row {
                             DefType::S32 => value.as_s32()? as u32 as u64,
                             DefType::U32 => value.as_u32()? as u64,
                             DefType::Dummy8 => value.as_u8()? as u64,
-                            _ => {
-                                return Err(FerrisoulsError::Custom(format!(
-                                    "Unexpected type in bitfield handling: {t:?}"
-                                )))
+                            _ => { return Err(format!("Unexpected type in bitfield handling: {t:?}").into())
                             }
                         };
 
@@ -353,15 +332,13 @@ impl Row {
                                 16 => writer.write_u16(bit_value as u16)?,
                                 32 => writer.write_u32(bit_value as u32)?,
                                 _ => {
-                                    return Err(FerrisoulsError::Custom(format!(
-                                        "Unexpected bit limit in bitfield handling: {bit_limit}"
-                                    )));
+                                    return Err(format!("Unexpected bit limit in bitfield handling: {bit_limit}").into());
                                 }
                             }
                         }
                     }
                 }
-                t => return Err(FerrisoulsError::Custom(format!("Unsupported field type: {t:?}"))),
+                t => return Err(format!("Unsupported field type: {t:?}").into()),
             }
         }
         Ok(())

@@ -8,6 +8,7 @@ use std::io::Read;
 use cipher::{block_padding::{NoPadding, Pkcs7}, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 
 use crate::binary::IO;
+use crate::errors::BinaryReaderError;
 use crate::games::Game;
 
 type Decryptor = cbc::Decryptor<aes::Aes256>;
@@ -15,9 +16,9 @@ type Encryptor = cbc::Encryptor<aes::Aes256>;
 
 
 
-pub fn decrypt(key: &[u8; 32], secret: &[u8]) -> Result<Vec<u8>, String> {
+pub fn decrypt(key: &[u8; 32], secret: &[u8]) -> Result<Vec<u8>, BinaryReaderError> {
     if secret.len() < 16 {
-        return Err("Secret must contain at least a 16-byte IV".to_string());
+        return Err("Secret must contain at least a 16-byte IV".into());
     }
 
     //first 16 bytes is iv
@@ -37,12 +38,11 @@ pub fn decrypt(key: &[u8; 32], secret: &[u8]) -> Result<Vec<u8>, String> {
     decryptor
         .decrypt_padded::<NoPadding>(&mut encrypted)
         .map(|result| result.to_vec())
-        .map_err(|_| "AES decryption failed".to_string())
+        .map_err(|_| "AES decryption failed".into())
 }
 
-pub fn decrypt_from(path: &Path, game: Game) -> Result<Vec<u8>, String> {
-    let mut file = File::open(path)
-        .map_err(|e| format!("Failed to open file: {e}"))?;
+pub fn decrypt_from(path: &Path, game: Game) -> Result<Vec<u8>, BinaryReaderError> {
+    let mut file = File::open(path)?;
     
     let mut data = Vec::new();
     file.read_to_end(&mut data);

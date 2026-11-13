@@ -24,9 +24,7 @@ impl TryFrom<u8> for BND2FilePathMode {
             1 => Ok(Self::FileName),
             2 => Ok(Self::FullPath),
             3 => Ok(Self::BaseDirectory),
-            _ => Err(BinaryReaderError::Custom(
-                format!("Invalid BND2 file path mode: {}", value)
-            ).into()),
+            _ => Err(format!("Invalid BND2 file path mode: {}", value).into())
         }
     }
 }
@@ -83,7 +81,6 @@ impl IO for BND2Header {
         reader.assert_bytes(b"BND\0")?;
 
         let header_info_flags = BND2HeaderFlags::from_bits_retain(reader.read_u8()?);
-
         let entry_info_flags = BND2EntryFlags::from_bits_retain(reader.read_u8()?);
 
         let unk06 = reader.read_u8()?;
@@ -95,16 +92,9 @@ impl IO for BND2Header {
         let base_dir_offset = reader.read_u32()?;
         let alignment_size = reader.read_u16()?;
 
-        let path_mode = BND2FilePathMode::try_from(reader.read_u8()?)
-            .map_err(|_| BinaryReaderError::custom("Failed to parse path mode"))?;
+        let path_mode = BND2FilePathMode::try_from(reader.read_u8()?)?;
 
-        let unk1b = reader.read_u8()?;
-        if unk1b != 0 && unk1b != 1 {
-            return Err(BinaryReaderError::Custom(
-                format!("Invalid BND2 unk1B: {}", unk1b)
-            ));
-        }
-
+        let unk1b = reader.matches(|r| r.read_u8(), &[0,1])?;
         reader.assert::<u32>(0)?;
 
         if !entry_info_flags.contains(BND2EntryFlags::NAME_OFFSET) {
@@ -183,9 +173,7 @@ impl BND2EntryHeader {
                 | BND2FilePathMode::FullPath
                 | BND2FilePathMode::BaseDirectory => {
                     if name_offset < 0 {
-                        return Err(BinaryReaderError::Custom(
-                            format!("Invalid BND2 name offset: {}", name_offset)
-                        ));
+                        return Err(format!("Invalid BND2 name offset: {}", name_offset).into());
                     }
 
                     reader.step_in(name_offset as u64)?;
@@ -237,21 +225,15 @@ pub struct BND2Entry {
 impl BND2Entry {
     pub fn from_reader(reader: &mut BinaryReader, header: BND2EntryHeader) -> Result<BND2Entry, BinaryReaderError> {
         if header.offset < 0 {
-            return Err(BinaryReaderError::Custom(
-                format!("Invalid BND2 file offset: {}", header.offset)
-            ));
+            return Err(format!("Invalid BND2 file offset: {}", header.offset).into());
         }
 
         if header.size < 0 {
-            return Err(BinaryReaderError::Custom(
-                format!("Invalid BND2 file size: {}", header.size)
-            ));
+            return Err(format!("Invalid BND2 file size: {}", header.size).into());
         }
 
         reader.step_in(header.offset as u64)?;
-
         let data = reader.read_bytes(header.size as usize)?;
-
         reader.step_out()?;
 
         Ok(Self {
@@ -313,16 +295,9 @@ impl BND2 {
     fn read_header(reader: &mut BinaryReader) -> Result<(Self, Vec<BND2EntryHeader>), BinaryReaderError> {
         reader.big_endian = false;
 
-        let magic = reader.read_bytes(4)?;
-
-        if magic.as_slice() != b"BND\0" {
-            return Err(BinaryReaderError::Custom(
-                "Invalid BND2 magic.".to_string()
-            ));
-        }
+        let magic = reader.assert_bytes(b"BND\0")?;
 
         let header_info_flags = BND2HeaderFlags::from_bits_retain(reader.read_u8()?);
-
         let entry_flags = BND2EntryFlags::from_bits_retain(reader.read_u8()?);
 
         let unk06 = reader.read_u8()?;
@@ -333,26 +308,18 @@ impl BND2 {
         let file_count = reader.read_i32()?;
 
         if file_count < 0 {
-            return Err(BinaryReaderError::Custom(
-                format!("Invalid BND2 file count: {}", file_count)
-            ));
+            return Err(format!("Invalid BND2 file count: {}", file_count).into());
         }
 
         let base_dir_offset = reader.read_i32()?;
         let alignment_size = reader.read_u16()?;
 
-        let path_mode = BND2FilePathMode::try_from(reader.read_u8()?)
-            .map_err(|_| BinaryReaderError::Custom("Failed to get path mode".to_string()))?;
+        let path_mode = BND2FilePathMode::try_from(reader.read_u8()?)?;
 
         let unk1b = reader.read_u8()?;
         let unk1c = reader.read_u32()?;
-
-        if unk1c != 0 {
-            return Err(BinaryReaderError::Custom(
-                format!("Invalid BND2 Unk1C: 0x{:08X}", unk1c)
-            ));
-        }
-
+        let unk1c = reader.assert::<u8>(0)?;
+     
         if !entry_flags.contains(BND2EntryFlags::NAME_OFFSET) {
             reader.assert::<u32>(0)?; //strange unkown field when !NAME_OFFSET
         }
@@ -361,9 +328,7 @@ impl BND2 {
             if path_mode == BND2FilePathMode::BaseDirectory && entry_flags.contains(BND2EntryFlags::NAME_OFFSET)
             {
                 if base_dir_offset < 0 {
-                    return Err(BinaryReaderError::Custom(
-                        format!("Invalid BND2 base directory offset: {}", base_dir_offset)
-                    ));
+                    return Err(format!("Invalid BND2 base directory offset: {}", base_dir_offset).into());
                 }
 
                 reader.step_in(base_dir_offset as u64)?;

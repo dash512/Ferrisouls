@@ -67,13 +67,9 @@ impl IO for BND4Header {
         let headers_end = reader.read_u64()?;
 
         let unicode = reader.read_boolean()?;
-
         let flags = BinderFlags::from_byte(reader.read_u8()?, bit_big_endian);
 
-        let extended = reader.read_u8()?;
-        if !matches!(extended, 0 | 1 | 4 | 0x80) {
-            return Err(BinaryReaderError::Custom(format!("Invalid BND4 extended value: 0x{:02X}", extended)));
-        }
+        let extended = reader.matches(|r| r.read_u8(), &[0, 1, 4, 0x80])?;
 
         reader.assert(b'\0')?;
         reader.assert_bytes(b"\0\0\0\0")?;
@@ -257,9 +253,7 @@ impl BND4EntryHeader {
         }
 
         if format.has_ids() {
-            writer.write_i32(self.entry_id.ok_or_else(|| 
-                BinaryWriterError::Custom(format!("BND4 entry {} requires an ID.", index))
-            )?)?;
+            writer.write_i32(self.entry_id.ok_or_else(|| format!("BND4 entry {} requires an ID.", index))?)?;
         }
 
         if format.has_names() {
@@ -267,10 +261,7 @@ impl BND4EntryHeader {
         }
 
         if format == BinderFlags::HAS_NAMES_1 {
-            writer.write_i32(self.names1_id.ok_or_else(|| 
-                BinaryWriterError::Custom(format!("BND4 entry {} requires a Names1 ID.", index))
-            )?)?;
-
+            writer.write_i32(self.names1_id.ok_or_else(|| format!("BND4 entry {} requires a Names1 ID.", index))?)?;
             writer.write_i32(self._names1_pad.unwrap_or(0))?;
         }
 
@@ -311,18 +302,13 @@ impl BND4Entry {
         reader.step_out()?;
 
         let data = if header.flags.is_compressed() {
-            let (data, _) = unsafe { Decompress::raw(&stored_data) }
-                .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
+            let (data, _) = unsafe { Decompress::raw(&stored_data) }?;
 
             let expected_size = header.uncompressed_size
-                .ok_or_else(|| BinaryReaderError::custom(
-                    "Compressed BND4 entry has no uncompressed size"
-                ))?;
+                .ok_or_else(|| "Compressed BND4 entry has no uncompressed size")?;
 
             if data.len() != expected_size as usize {
-                return Err(BinaryReaderError::Custom(
-                    format!("Expected entry size of {}, got {}", expected_size, data.len())
-                ));
+                return Err(format!("Expected entry size of {}, got {}", expected_size, data.len()).into());
             }
 
             data
@@ -344,7 +330,7 @@ impl BND4Entry {
         let stored_data = if self.header.flags.is_compressed() {
             let compset = CompressSettings::Oodle(OodleSettings::KRAK);
             unsafe { Compress::raw(&self.data, &compset) }
-                .map_err(|e| BinaryWriterError::Custom(e.to_string()))?
+                ?
 
         } else {
             self.data.clone()
@@ -396,11 +382,8 @@ impl IO for BND4 {
         let expected_entry_header_size = header.flags.get_entry_header_size();
 
         if header.entry_header_size != expected_entry_header_size as u64 {
-            return Err(BinaryReaderError::Custom(
-                format!("Invalid BND4 entry header size: expected 0x{:X}, got 0x{:X}",
-                expected_entry_header_size,
-                header.entry_header_size
-            )));
+            return Err(format!("Invalid BND4 entry header size: expected 0x{:X}, got 0x{:X}",
+                expected_entry_header_size, header.entry_header_size).into()); 
         }
 
         let mut entries = Vec::with_capacity(header.entry_count as usize);
@@ -454,11 +437,8 @@ impl IO for BND4 {
                 .iter()
                 .enumerate()
                 .map(|(index, entry)| {
-                    entry.name.clone().ok_or_else(|| {
-                        BinaryWriterError::Custom(
-                            format!("BND4 entry {} requires a name for the hash table.", index)
-                        )
-                    })
+                    entry.name.clone()
+                        .ok_or_else(|| format!("BND4 entry {} requires a name for the hash table.", index))
                 })
                 .collect::<Result<_, _>>()?;
 

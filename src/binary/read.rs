@@ -19,9 +19,9 @@ fn invalid(msg: impl Into<String>) -> BinaryReaderError {
 }
 
 fn assertion_failed(found: &dyn Debug, expected: &dyn Debug, loc: u64) -> BinaryReaderError {
-    BinaryReaderError::Custom(format!(
+    format!(
         "Asserted value was incorrect! Got: `{found:?}` | Expected: `{expected:?}` | At: `{loc:?}`"
-    ))
+    ).into()
 }
 
 /// Truncates at the first NUL byte (for fixed-width string fields).
@@ -399,7 +399,7 @@ impl<'a> BinaryReader<'a> {
                 return Ok(v.clone())
             }
         }
-        Err(BinaryReaderError::Custom(format!("Match failed! `{:?}` was not in asserted array: `{:?}`", read, values)))
+        Err(format!("Match failed! `{:?}` was not in asserted array: `{:?}`", read, values).into())
     }
 
     //region Integers & floats
@@ -585,9 +585,7 @@ impl<'a> BinaryReader<'a> {
     //region Strings: decoding helpers
 
     fn decode_utf8(bytes: &[u8]) -> Result<String> {
-        std::str::from_utf8(bytes)
-            .map(str::to_owned)
-            .map_err(|_| invalid("Invalid UTF-8 string"))
+        Ok(std::str::from_utf8(bytes).map(str::to_owned)?)
     }
 
     fn decode_ascii(bytes: &[u8]) -> Result<String> {
@@ -609,7 +607,7 @@ impl<'a> BinaryReader<'a> {
     }
 
     fn decode_utf16(units: &[u16]) -> Result<String> {
-        String::from_utf16(units).map_err(|_| invalid("Invalid UTF-16 string"))
+        Ok(String::from_utf16(units)?)
     }
 
     //region ASCII / UTF-8

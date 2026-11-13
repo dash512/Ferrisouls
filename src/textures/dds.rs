@@ -267,9 +267,7 @@ impl IO for DDSPixelFormat {
         writer.write_u32_le(self.flags.bits())?;
 
         writer.write_ascii_fixed(
-            &String::from_utf8(self.fourcc.to_vec())
-                .map_err(|e| BinaryWriterError::custom(e.to_string()))?,
-            4)?;
+            &String::from_utf8(self.fourcc.to_vec())?, 4)?;
         
         writer.write_i32_le(self.rgb_bit_count)?;
         writer.write_u32_le(self.r_bitmask)?;
@@ -316,8 +314,7 @@ impl DX10Header {
 
 impl IO for DX10Header {
     fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
-        let dxgi_format = DxgiFormat::from_id(reader.read_u32_le()? as u8)
-            .map_err(|e| BinaryReaderError::custom(e.to_string()))?;
+        let dxgi_format = DxgiFormat::from_id(reader.read_u32_le()? as u8)?;
 
         let resource_dimension = D3D10ResourceDimension::from_bits_retain(reader.read_u32_le()?);
         let misc_flag = ResourceMisc::from_bits_retain(reader.read_u32_le()?);
@@ -582,10 +579,10 @@ impl DDS {
 
     pub fn to_file(&mut self, path: &Path) -> Result<(), BinaryWriterError> where Self: Sized {
         let mut file = File::create_new(path)
-            .map_err(BinaryWriterError::IO)?;
+            ?;
 
         file.write_all(&self.to_bytes()?)
-            .map_err(BinaryWriterError::IO)?;
+            ?;
 
         Ok(())
     }
@@ -598,7 +595,7 @@ impl DDS {
     }
 
     pub fn to_image(&self) -> Result<RgbaImage, FerrisoulsError> {
-        RgbaImage::from_dds(&self)
+        Ok(RgbaImage::from_dds(&self)?)
     }
 
     pub fn to(&self, format: ImageFormat) -> Result<Vec<u8>, FerrisoulsError> {

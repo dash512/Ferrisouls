@@ -12,6 +12,7 @@ pub mod utils;
 pub mod swizzling;
 pub mod headerizer;
 pub mod image;
+pub mod ktx2;
 
 
 

@@ -10,8 +10,9 @@ use crate::dcx::{Compress, CompressSettings, DCXType};
 use crate::dcx::{DCXType::DCP_EDGE, Decompress};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 use crate::oodle::OodleSettings;
-use crate::textures::dds::{DDS, DDSCAPS2, ResourceMisc};
+use crate::textures::dds::{AlphaMode, D3D10ResourceDimension, DDS, DDSCAPS2, DX10Header, ResourceMisc};
 use crate::textures::headerizer;
+use crate::textures::ktx2::KTX2;
 use crate::textures::dxgi::DxgiFormat;
 use crate::textures::image::ImageFormat;
 
@@ -23,8 +24,13 @@ pub enum TPFPlatform {
     PS3 = 2,
     PS4 = 4,
     XboxOne = 5,
-    PS5 = 8, // Virtuos Games, Switch enum. Technically 4, but conflicts with From Software's PS4 enum.
-    Switch = 67 // TPFTexture metadata is same as PC; textures are headered .xtx
+    PS5 = 8,
+    ///Elden Ring: Tarnished Edition (Switch 2). Same layout and tiling as `Switch2`.
+    Switch2ER = 7,
+    Switch2 = 0xA,
+    ///Virtuos Games, Switch enum. Technically 4, but conflicts with From Software's PS4 enum.
+    /// Texture metadata is same as PC; textures are headered .xtx.
+    Switch = 67,
 
 }
 
@@ -36,9 +42,11 @@ impl TPFPlatform {
             2 => TPFPlatform::PS3,
             4 => TPFPlatform::PS4,
             5 => TPFPlatform::XboxOne,
+            7 => TPFPlatform::Switch2ER,
             8 => TPFPlatform::PS5,
+            0xA => TPFPlatform::Switch2,
             67 => TPFPlatform::Switch,
-            _ => return Err(BinaryReaderError::Custom(format!("Unknown TPF platform: {v}"))),
+            _ => return Err(format!("Unknown TPF platform: {v}").into()),
         })
     }
  
@@ -46,12 +54,16 @@ impl TPFPlatform {
         matches!(self, TPFPlatform::Xbox360 | TPFPlatform::PS3)
     }
  
-    /// PS4, Xbone, PS5: DX10-style console metadata.
+    /// PS4, Xbone, PS5, Switch 2: DX10-style console metadata.
     fn is_dx10_console(self) -> bool {
-        matches!(self, TPFPlatform::PS4 | TPFPlatform::XboxOne | TPFPlatform::PS5)
+        !matches!(self, TPFPlatform::PC | TPFPlatform::Xbox360 | TPFPlatform::PS3 | TPFPlatform::Switch)
+    }
+
+    fn is_switch2(self) -> bool {
+        matches!(self, TPFPlatform::Switch2 | TPFPlatform::Switch2ER)
     }
  
-    /// Platforms whose textures carry a `TPFTextureHeader`.
+    /// Platforms whose textures carry a `TPFTextureHeader`. (all except PC & Switch)
     fn has_tex_header(self) -> bool {
         self != TPFPlatform::PC && self != TPFPlatform::Switch
     }
@@ -73,7 +85,7 @@ impl TextureType {
             1 => Ok(Self::Cubemap),
             2 => Ok(Self::Volume),
             3 => Ok(Self::TextureArray),
-            t => Err(BinaryReaderError::Custom(format!("Invalid TextureType: {}", t)))
+            t => Err(format!("Invalid TextureType: {}", t).into())
         }
     }
 
@@ -83,7 +95,7 @@ impl TextureType {
             Self::Cubemap => Ok(1),
             Self::Volume => Ok(2),
             Self::TextureArray => Ok(3),
-            t => Err(BinaryWriterError::Custom(format!("Invalid TextureType: {:?}", t)))
+            t => Err(format!("Invalid TextureType: {:?}", t).into())
         }
     }
 }
@@ -102,7 +114,7 @@ impl FloatStruct {
         let unk00 = reader.read_i32()?;
         let length = reader.read_i32()?;
         if length < 0 || length % 4 != 0 {
-            return Err(FerrisoulsError::Custom(format!("Unexpected FloatStruct length: {length}")));
+            return Err(format!("Unexpected FloatStruct length: {length}").into());
         }
         let mut vals = Vec::<f32>::new();
         for _ in 0..(length/4) {
@@ -126,8 +138,12 @@ pub struct TPFTextureHeader {
     pub width: i32,
     pub height: i32,
     pub texture_count: i32,
-    unk1: u16, // PS3 only
-    unk2: u16, // 0x0 or 0xAAE4 in DeS, 0xD in BB/DS3 (console)
+
+    unk1: i32, // PS3 only
+    unk2: i32, // 0x0 or 0xAAE4 in DeS, 0xD in BB/DS3 (console)
+    unk3_swi2: u16, // Switch 2 only. Always 0xC9?
+    unk4_swi2: u16, // Switch 2 only. Always 0x1?
+
     pub remap: i32, // A value for remapping color channel order on PS3.
     pub dxgi_format: DxgiFormat, //default to Unknown 
 }
@@ -172,16 +188,8 @@ impl TPFTexture {
         }
     }
 
-    ///Create a new TPFTexture with the specified information; cubemap and mipmaps are determined
-    /// based on bytes. Assumes the input is a standard PC .dds file or a Dark Souls Remastered PS4 .gnf
-    pub fn from_dds(name: &str, format: u8, flags1: u8, bytes: Vec<u8>, platform: TPFPlatform) -> Result<Self, FerrisoulsError> {
-        let mut tex = TPFTexture::new(platform);
-        tex.name = name.to_string();
-        tex.format = format;
-        tex.texture_flags = flags1;
- 
-        let mut dds = DDS::from_bytes(&bytes)?;
-        tex.texture_type = if dds.header.caps2.contains(DDSCAPS2::Cubemap) {
+    pub fn dds_texture_type(dds: &DDS) -> TextureType {
+        if dds.header.caps2.contains(DDSCAPS2::Cubemap) {
             TextureType::Cubemap
         } else if dds.header.caps2.contains(DDSCAPS2::Volume) {
             TextureType::Volume
@@ -189,33 +197,88 @@ impl TPFTexture {
             TextureType::TextureArray
         } else {
             TextureType::TPFTexture
-        };
- 
-        let is_gnf = bytes.get(0..4) == Some(b"GNF ".as_slice());
+        }
+    }
+
+    ///Create a new TPFTexture with the specified information; cubemap and mipmaps are determined
+    /// based on bytes. Assumes the input is a standard PC .dds file or a Dark Souls Remastered PS4 .gnf.
+    ///For Switch 2, a KTX2 file containing ASTC data is also accepted.
+    pub fn from_dds(name: &str, format: u8, flags1: u8, bytes: Vec<u8>, platform: TPFPlatform) -> Result<Self, FerrisoulsError> {
+        let mut tex = TPFTexture::new(platform);
+        tex.name = name.to_string();
+        tex.format = format;
+        tex.texture_flags = flags1;
+
+        // PC, Switch and GNF data is stored as given. This has to be decided before anything tries to
+        // parse the bytes as a DDS, because a GNF or XTX isn't one.
+        let magic = bytes.get(0..4);
+        let is_gnf = magic == Some(b"GNF ".as_slice());
         if platform == TPFPlatform::PC || platform == TPFPlatform::Switch || is_gnf {
+            if magic == Some(b"DDS ".as_slice()) {
+                if let Ok(dds) = DDS::from_bytes(&bytes) {
+                    tex.texture_type = Self::dds_texture_type(&dds);
+                }
+            }
             tex.data = bytes;
             return Ok(tex);
         }
- 
-        let mut header = TPFTextureHeader {
-            dxgi_format: dds.dxgi_format(),
-            width: dds.header.width as i32,
-            height: dds.header.height as i32,
-            ..Default::default()
-        };
-        header.texture_count = match tex.texture_type {
-            TextureType::TPFTexture => 1,
-            TextureType::Cubemap => 6,
-            TextureType::Volume | TextureType::TextureArray => dds.header.depth,
-        };
- 
-        let mut images = headerizer::get_dds_texture_buffers(&mut dds, &bytes)?;
- 
+
+        let mut header = TPFTextureHeader::default();
+        let mut dds: DDS;
+        let mut images: Vec<headerizer::Image>;
+
+        if KTX2::is(&bytes) {
+            // KTX2 import for Switch 2 ASTC textures; the DXGI format carries the footprint and sRGB-ness
+            let ktx = KTX2::from_bytes(&bytes)?;
+            let dxgi = ktx
+                .dxgi_format()
+                .ok_or("Only ASTC KTX2 textures are supported.")?;
+            let width = ktx.pixel_width as i32;
+            let height = ktx.pixel_height as i32;
+            let layer_count = ktx.layer_count as i32;
+
+            // Barebones DDS to pass info along to the writer
+            dds = DDS::new();
+            dds.header.width = width;
+            dds.header.height = height;
+            dds.dx10_header = Some(DX10Header {
+                dxgi_format: dxgi,
+                resource_dimension: D3D10ResourceDimension::TEXTURE2D,
+                misc_flag: ResourceMisc::empty(),
+                array_size: 1,
+                alpha_mode: AlphaMode::UNKNOWN,
+            });
+
+            tex.texture_type = if layer_count > 1 { TextureType::TextureArray } else { TextureType::TPFTexture };
+            header.dxgi_format = dxgi;
+            header.width = width;
+            header.height = height;
+            header.texture_count = match tex.texture_type {
+                TextureType::TextureArray => layer_count,
+                _ => 1,
+            };
+            images = ktx.get_images();
+        } else {
+            dds = DDS::from_bytes(&bytes)?;
+            tex.texture_type = Self::dds_texture_type(&dds);
+
+            header.dxgi_format = dds.dxgi_format();
+            header.width = dds.header.width as i32;
+            header.height = dds.header.height as i32;
+            header.texture_count = match tex.texture_type {
+                TextureType::TPFTexture => 1,
+                TextureType::Cubemap => 6,
+                TextureType::Volume | TextureType::TextureArray => dds.header.depth,
+            };
+
+            images = headerizer::get_dds_texture_buffers(&mut dds, &bytes)?;
+        }
+
         // Set this here in case we need to adjust it
         tex.mipmap_count = dds.header.mipmap_count as u8;
         match platform {
-            TPFPlatform::Xbox360 => return Err(FerrisoulsError::custom("Not Implemented!")),
-            TPFPlatform::XboxOne => return Err(FerrisoulsError::custom("Not Implemented!")),
+            TPFPlatform::Xbox360 => return Err(FerrisoulsError::not_implemented("Xbox 360 TPF writing")),
+            TPFPlatform::XboxOne => return Err(FerrisoulsError::not_implemented("Xbox One TPF writing")),
             TPFPlatform::PS3 => {
                 tex.data = headerizer::Write::PS3(&images, &dds, format)?;
             }
@@ -223,8 +286,11 @@ impl TPFTexture {
                 tex.data = headerizer::Write::PS4(&mut images, &dds, tex.texture_type)?;
                 header.unk2 = 0xD;
             }
-            TPFPlatform::PS5 => return Err(FerrisoulsError::custom("Not Implemented!")),
-            _ => {}
+            TPFPlatform::Switch2 | TPFPlatform::Switch2ER => {
+                tex.data = headerizer::Write::Switch2(&images, &dds, tex.texture_type)?;
+            }
+            TPFPlatform::PS5 => return Err(FerrisoulsError::not_implemented("PS5 TPF writing")),
+            TPFPlatform::PC | TPFPlatform::Switch => {} // returned above
         }
         tex.header = Some(header);
         Ok(tex)
@@ -267,7 +333,11 @@ impl TPFTexture {
         }
 
         let dds_format = dds.dxgi_format();
-        let format = DxgiFormat::from_internal(self.format);
+        // The header's DXGI field is authoritative where present (e.g. Switch 2 ASTC); the format byte is a fallback.
+        let format = self.header
+            .map(|h| h.dxgi_format)
+            .filter(|f| *f != DxgiFormat::UNKNOWN)
+            .unwrap_or_else(|| DxgiFormat::from_internal(self.format));
         if dds_format != format {
             return Err(BinaryReaderError::InvalidData(format!(
                 "DDS of format `{:?}` was expected to be: {:?}",
@@ -316,13 +386,24 @@ impl TPFTexture {
             if platform == TPFPlatform::Xbox360 {
                 reader.assert::<i32>(0)?;
             } else if platform == TPFPlatform::PS3 {
-                h.unk1 = reader.read_i32()? as u16;
+                h.unk1 = reader.read_i32()?;
                 if tpf_flags != 0 {
                     h.remap = reader.read_i32()?;
                 }
             } else if platform.is_dx10_console() {
                 h.texture_count = reader.read_i32()?;
-                h.unk2 = reader.matches(|r| r.read_i32(), &[0, 0x9, 0xD])? as u16;
+                //SFNext note:
+                //Duskbloods (Switch 2) uses values 0x0-0x4 for Unk2;
+                //Elden Ring envmap probe arrays also use 0x20/0x30/0x40 (2x slice count)
+                h.unk2 = reader.matches(
+                    |r| r.read_i32(), 
+                    &[0, 0x1, 0x2, 0x3, 0x4, 0x9, 0xD, 0x20, 0x30, 0x40]
+                )?;
+
+                if platform.is_switch2() {
+                    h.unk3_swi2 = reader.read_u16()?;
+                    h.unk4_swi2 = reader.read_u16()?;
+                }
             }
 
             header = Some(h)
@@ -334,22 +415,19 @@ impl TPFTexture {
  
         if platform.is_dx10_console() {
             if let Some(header) = header.as_mut() {
-                header.dxgi_format = DxgiFormat::from_id(reader.read_i32()? as u8)
-                    .unwrap_or_default();
+                header.dxgi_format = DxgiFormat::from_id_extended(reader.read_i32()?.clamp(0, 0xFF) as u8).unwrap_or_default();
             }
         }
  
         let float_struct = if has_float_struct { 
-            Some(FloatStruct::read(reader)
-                .map_err(|e| BinaryReaderError::custom(e.to_string()))?
+            Some(FloatStruct::read(reader)?
             ) 
         } else { None };
  
         let mut bytes = reader.get_bytes(file_offset as u64, file_size as usize)?;
         if texture_flags == 2 || texture_flags == 3 {
             let (decompressed, kind) = unsafe { 
-                Decompress::raw(&bytes)
-                    .map_err(|e| BinaryReaderError::custom(e.to_string()))?
+                Decompress::raw(&bytes)?
             };
             if kind != DCP_EDGE {
                 return Err(BinaryReaderError::InvalidData(format!(
@@ -398,8 +476,7 @@ impl TPFTexture {
  
     pub fn write_header(&mut self, writer: &mut BinaryWriter, index: usize, platform: TPFPlatform, tpf_flags: u8) -> Result<(), BinaryWriterError> {
         if platform == TPFPlatform::PC {
-            let dds = DDS::from_bytes(&self.data)
-                .map_err(|e| BinaryWriterError::custom(e.to_string()))?;
+            let dds = DDS::from_bytes(&self.data)?;
 
             self.texture_type = if dds.header.caps2.contains(DDSCAPS2::Cubemap) {
                 TextureType::Cubemap
@@ -423,7 +500,7 @@ impl TPFTexture {
             let header = self
                 .header
                 .as_ref()
-                .ok_or_else(|| BinaryWriterError::Custom(format!("TPFTexture {} is missing its header", self.name)))?;
+                .ok_or_else(|| format!("TPFTexture {} is missing its header", self.name))?;
             writer.write_i16(header.width as i16);
             writer.write_i16(header.height as i16);
  
@@ -437,6 +514,11 @@ impl TPFTexture {
             } else if platform.is_dx10_console() {
                 writer.write_i32(header.texture_count);
                 writer.write_i32(header.unk2 as i32);
+
+                if platform.is_switch2() {
+                    writer.write_u16(header.unk3_swi2)?;
+                    writer.write_u16(header.unk4_swi2)?;
+                }
             }
         }
  
@@ -444,13 +526,14 @@ impl TPFTexture {
         // Formerly 'Flags2', as seen in Yabber
         writer.write_i32(if self.float_struct.is_none() { 0 } else { 1 });
  
-        // Note: the reader also reads this for PS5, but the original writer does not write it.
-        if platform == TPFPlatform::PS4 || platform == TPFPlatform::XboxOne {
-            if let Some(header) = &self.header {
-                writer.write_i32(self.format as i32);
-            }
+        if platform.is_dx10_console() {
+            let header = self
+                .header
+                .as_ref()
+                .ok_or_else(|| format!("TPFTexture {} is missing its header", self.name))?;
+            writer.write_i32(header.dxgi_format.id() as i32);
         }
- 
+
         if let Some(fs) = &self.float_struct {
             fs.write(writer);
         }
@@ -477,8 +560,7 @@ impl TPFTexture {
         let compressed;
         let bytes: &[u8] = if self.texture_flags == 2 || self.texture_flags == 3 {
             compressed = unsafe { 
-                Compress::raw(&self.data, &settings)
-                    .map_err(|e| BinaryWriterError::custom(e.to_string()))? 
+                Compress::raw(&self.data, &settings)? 
             };
             &compressed
         } else {

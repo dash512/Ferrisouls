@@ -9,6 +9,7 @@ use md5::{Digest, Md5};
 use cipher::{block_padding::{NoPadding, Pkcs7}, BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
 
 use crate::binary::IO;
+use crate::errors::BinaryReaderError;
 use crate::games::Game;
 
 type Decryptor = cbc::Decryptor<aes::Aes128>;
@@ -19,7 +20,7 @@ type Encryptor = cbc::Encryptor<aes::Aes128>;
 /// Format: [[16 bytes MD5]][[16 bytes IV]][[AES-CBC ciphertext]]
 ///
 /// Padding is intentionally not removed. SL2 padding does not always contain the minimum PKCS#7 padding byte.
-pub fn decrypt(encrypted: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, String> {
+pub fn decrypt(encrypted: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, BinaryReaderError> {
     if encrypted.len() < 32 {
         return Err("SL2 file is too short".into());
     }
@@ -43,10 +44,9 @@ pub fn decrypt(encrypted: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, String> {
         .map_err(|_| "AES-CBC decryption failed".into())
 }
 
-pub fn decrypt_from(path: &Path, game: Game) -> Result<Vec<u8>, String> {
+pub fn decrypt_from(path: &Path, game: Game) -> Result<Vec<u8>, BinaryReaderError> {
     let mut buffer = Vec::<u8>::new();
-    let mut file = File::open(path)
-        .map_err(|e| format!("Failed to open file: {e}"))?;
+    let mut file = File::open(path)?;
 
     file.read_to_end(&mut buffer);
 

@@ -9,7 +9,7 @@ use bitflags::bitflags;
 use regex::Regex;
 
 use crate::binary::{BinaryReader, BinaryWriter};
-use crate::errors::FerrisoulsError;
+use crate::errors::{BinaryReaderError, FerrisoulsError};
 use crate::formats::param::cell::CellValue;
 use crate::formats::param::util;
 
@@ -78,7 +78,7 @@ impl FromStr for DefType {
             "dummy8" => DefType::Dummy8,
             "fixstr" => DefType::FixStr,
             "fixstrW" => DefType::FixStrW,
-            _ => return Err(FerrisoulsError::Custom(format!("Unknown paramdef type: {s:?}"))),
+            _ => return Err(format!("Unknown paramdef type: {s:?}").into()),
         })
     }
 }
@@ -221,9 +221,7 @@ impl Paramdef {
         }
 
         if !((fv < 200 && header_size == 0x30) || (fv >= 200 && header_size == 0xFF)) {
-            return Err(FerrisoulsError::Custom(format!(
-                "Unexpected header size 0x{header_size:X} for version {fv}."
-            )));
+            return Err(format!("Unexpected header size 0x{header_size:X} for version {fv}.").into());
         }
 
         paramdef.basic_fields = fv == 0 && field_size == 0x68;
@@ -242,9 +240,7 @@ impl Paramdef {
                     | (203, 0x88)
             );
         if !field_size_ok {
-            return Err(FerrisoulsError::Custom(format!(
-                "Unexpected field size 0x{field_size:X} for version {fv}."
-            )));
+            return Err(format!("Unexpected field size 0x{field_size:X} for version {fv}.").into());
         }
 
         paramdef.fields = Vec::with_capacity(field_count.max(0) as usize);
@@ -260,7 +256,7 @@ impl Paramdef {
         let fv = self.format_version;
         let ok = (self.basic_fields && fv == 0) || matches!(fv, 101 | 102 | 103 | 104 | 106 | 201 | 202 | 203);
         if !ok {
-            return Err(FerrisoulsError::Custom(format!("Unsupported version: {fv}")));
+            return Err(format!("Unsupported version: {fv}").into());
         }
         Ok(())
     }
@@ -270,7 +266,7 @@ impl Paramdef {
     /// Serializes file data to a writer.
     pub fn write(&self, writer: &mut BinaryWriter) -> Result<(), FerrisoulsError> {
         if self.version_aware {
-            return Err(FerrisoulsError::custom("Version aware PARAMDEFs cannot be written as binary."));
+            return Err("Version aware PARAMDEFs cannot be written as binary.".into());
         }
 
         let fv = self.format_version;
@@ -294,11 +290,7 @@ impl Paramdef {
                 201 => 0xD0,
                 202 => 0x68,
                 203 => 0x88,
-                _ => {
-                    return Err(FerrisoulsError::Custom(format!(
-                        "Unsupported format version: {fv}"
-                    )))
-                }
+                _ => { return Err(format!("Unsupported format version: {fv}").into()) }
             }
         };
         writer.write_i16(field_size);
@@ -370,9 +362,7 @@ impl Paramdef {
 
     pub fn get_fields_size(&self, field_count: usize, version: u64) -> Result<i32, FerrisoulsError> {
         if field_count > self.fields.len() {
-            return Err(FerrisoulsError::custom(
-                "Count must be from 0 to total fields count.",
-            ));
+            return Err("Count must be from 0 to total fields count.".into());
         }
 
         let mut size: i32 = 0;
@@ -418,7 +408,7 @@ impl Paramdef {
     /// are valid for a specific regulation version. Underlying fields are shared, not cloned.
     pub fn get_filtered_paramdef_for_regulation_version(&self, version: u64) -> Result<Paramdef, FerrisoulsError> {
         if !self.version_aware {
-            return Err(FerrisoulsError::custom("Version aware PARAMDEF required for filtering"));
+            return Err("Version aware PARAMDEF required for filtering".into());
         }
         Ok(Paramdef {
             data_version: self.data_version,
@@ -499,30 +489,30 @@ impl Default for Field {
 
 // Helpers mirroring `Convert.ToXxx(object)` where null converts to zero.
 fn opt_f32(v: &Option<CellValue>) -> Result<f32, FerrisoulsError> {
-    match v {
-        None => Ok(0.0),
+    Ok(match v {
+        None => 0.0,
         Some(v) => v
             .to_float()
             .map(|f| f as f32)
-            .ok_or_else(|| FerrisoulsError::Custom(format!("Cannot convert {v} to f32"))),
-    }
+            .ok_or_else(|| format!("Cannot convert {v} to f32"))?
+    })
 }
 fn opt_f64(v: &Option<CellValue>) -> Result<f64, FerrisoulsError> {
-    match v {
-        None => Ok(0.0),
+    Ok(match v {
+        None => 0.0,
         Some(v) => v
             .to_float()
-            .ok_or_else(|| FerrisoulsError::Custom(format!("Cannot convert {v} to f64"))),
-    }
+            .ok_or_else(|| format!("Cannot convert {v} to f64"))?
+    })
 }
 fn opt_i32(v: &Option<CellValue>) -> Result<i32, FerrisoulsError> {
-    match v {
-        None => Ok(0),
+    Ok(match v {
+        None => 0,
         Some(v) => v
             .to_integer()
             .and_then(|i| i32::try_from(i).ok())
-            .ok_or_else(|| FerrisoulsError::Custom(format!("Cannot convert {v} to i32"))),
-    }
+            .ok_or_else(|| format!("Cannot convert {v} to i32"))?
+    })
 }
 
 impl Field {
@@ -550,7 +540,7 @@ impl Field {
         }
     }
 
-    pub fn from_reader(reader: &mut BinaryReader, def: &Paramdef) -> Result<Self, FerrisoulsError> {
+    pub fn from_reader(reader: &mut BinaryReader, def: &Paramdef) -> Result<Self, BinaryReaderError> {
         let fv = def.format_version;
 
         let display_name = if offset_strings(fv) {
@@ -583,9 +573,7 @@ impl Field {
         let value_size = util::get_value_size(display_type);
         let is_array = util::is_array_type(display_type);
         if (!is_array && byte_count != value_size) || (is_array && byte_count % value_size != 0) {
-            return Err(FerrisoulsError::Custom(format!(
-                "Unexpected byte count {byte_count} for type {display_type}."
-            )));
+            return Err(format!("Unexpected byte count {byte_count} for type {display_type}.").into());
         }
         let mut array_length = byte_count / value_size;
 
@@ -645,34 +633,32 @@ impl Field {
             });
             if let Some((name, size)) = bit_match {
                 internal_name = name;
-                field.bit_size = size.map_err(|e| FerrisoulsError::Custom(e.to_string()))?;
+                field.bit_size = size?;
             }
 
             if is_array {
                 let caps = ARRAY_LENGTH_RX.captures(&internal_name).map(|c| {
                     (c["name"].to_string(), c["length"].parse::<i32>())
                 });
-                let length = match &caps {
-                    Some((_, l)) => *l.as_ref().map_err(|e| FerrisoulsError::Custom(e.to_string()))?,
+                let length = match caps {
+                    Some((n, l)) => {
+                        internal_name = n;
+                        l?
+                    },
                     None => 1,
                 };
+
                 if length != array_length {
                     // AcActRestrictionParam.def in Armored Core V has its last field with an internal
                     // name of reserved[8] and type of u8, but its byte count is 1, and the data only has
                     // 1 byte as well. So this exception is skipped for u8/dummy8. - SFNext
                     if display_type != DefType::U8 && display_type != DefType::Dummy8 {
-                        return Err(FerrisoulsError::Custom(format!(
-                            "Mismatched array length in {internal_name} with byte count {byte_count}."
-                        )));
+                        return Err(format!("Mismatched array length in {internal_name} with byte count {byte_count}.").into());
                     }
 
                     // Should probably trust the byte count over the name, but just in case...
                     array_length = array_length.min(length);
                     field.array_length = array_length;
-                }
-
-                if let Some((name, _)) = caps {
-                    internal_name = name;
                 }
             }
             field.internal_name = internal_name;

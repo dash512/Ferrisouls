@@ -207,9 +207,7 @@ impl IO for Param {
     fn into_writer(&mut self) -> Result<BinaryWriter, BinaryWriterError> {
         let mut writer = BinaryWriter::default();
 
-        let applied = self.applied_paramdef.as_ref().ok_or_else(|| {
-            BinaryWriterError::custom("Params cannot be written without applying a paramdef.")
-        })?;
+        let applied = self.applied_paramdef.as_ref().ok_or_else(|| "Params cannot be written without applying a paramdef.")?;
 
         writer.big_endian = self.big_endian;
 
@@ -227,11 +225,8 @@ impl IO for Param {
         writer.write_i16(self.paramdef_data_version);
 
         if self.rows.len() > u16::MAX as usize {
-            return Err(BinaryWriterError::Custom(format!(
-                "Param \"{}\" has more than {} rows and cannot be saved.",
-                applied.param_type,
-                u16::MAX
-            )));
+            return Err(format!("Param \"{}\" has more than {} rows and cannot be saved.",
+                applied.param_type,u16::MAX).into());
         }
         writer.write_u16(self.rows.len() as u16);
 
@@ -266,7 +261,7 @@ impl IO for Param {
         if !self.headerless_rows {
             for (i, row) in self.rows.iter().enumerate() {
                 row.write_header(&mut writer, self, i)
-                    .map_err(|e| BinaryWriterError::custom(e.to_string()));
+                    ;
             }
         }
 
@@ -285,7 +280,7 @@ impl IO for Param {
 
         for (i, row) in self.rows.iter().enumerate() {
             row.write_cells(&mut writer, self, i)
-                .map_err(|e| BinaryWriterError::custom(e.to_string()));
+                ;
         }
 
         writer.fill::<u32>("StringsOffset", writer.position() as u32);
@@ -302,7 +297,7 @@ impl IO for Param {
             writer.write_i16(0); // null string
             for (i, row) in self.rows.iter().enumerate() {
                 row.write_name(&mut writer, self, i, &mut string_offsets)
-                    .map_err(|e| BinaryWriterError::custom(e.to_string()));
+                    ;
             }
 
             // DeS and BB sometimes (but not always) include some useless padding here - SFNext
@@ -324,7 +319,7 @@ impl Param {
         let data = self
             .row_reader
             .as_mut()
-            .ok_or_else(|| FerrisoulsError::custom("Param has no row data to read"))?;
+            .ok_or_else(|| "Param has no row data to read")?;
         let mut reader = BinaryReader::new(data, true, false);
 
         for row in &mut self.rows {
@@ -336,7 +331,7 @@ impl Param {
 
     pub fn apply_regulation_versioned_paramdef(&mut self, paramdef: &Paramdef, version: u64) -> Result<(), FerrisoulsError> {
         if !paramdef.version_aware {
-            return Err(FerrisoulsError::custom("PARAMDEF must be version aware to apply with a regulation version"));
+            return Err("PARAMDEF must be version aware to apply with a regulation version".into());
         }
         self.apply_paramdef_inner(paramdef, version)
     }

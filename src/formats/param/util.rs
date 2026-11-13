@@ -162,22 +162,22 @@ pub fn get_value_size(ty: DefType) -> i32 {
 }
 
 fn default_int<T: TryFrom<i128>>(v: &Option<CellValue>, ty: &str) -> Result<T, FerrisoulsError> {
-    match v {
-        None => T::try_from(0).map_err(|_| FerrisoulsError::Custom(format!("Cannot convert 0 to {ty}"))),
+    Ok(match v {
+        None => T::try_from(0).ok().ok_or_else(|| format!("Default0 cannot be converted to {ty}"))?,
         Some(v) => v
             .to_integer()
             .and_then(|n| T::try_from(n).ok())
-            .ok_or_else(|| FerrisoulsError::Custom(format!("Default {v} cannot be converted to {ty}"))),
-    }
+            .ok_or_else(|| format!("Default {v} cannot be converted to {ty}"))?
+    })
 }
 
 fn default_float(v: &Option<CellValue>, ty: &str) -> Result<f64, FerrisoulsError> {
-    match v {
-        None => Ok(0.0),
+    Ok(match v {
+        None => 0.0,
         Some(v) => v
             .to_float()
-            .ok_or_else(|| FerrisoulsError::Custom(format!("Default {v} cannot be converted to {ty}"))),
-    }
+            .ok_or_else(|| format!("Default {v} cannot be converted to {ty}"))?
+    })
 }
 
 pub fn convert_default_value(field: &Field) -> Result<CellValue, FerrisoulsError> {

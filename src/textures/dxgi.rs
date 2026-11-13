@@ -62,6 +62,19 @@ impl FormatInfo {
             _ => (1, 1),
         }
     }
+
+    ///Output size in bytes for the padded block grid, overflow-checked.
+    pub fn linear_size(&self, width: u32, height: u32) -> Option<usize> {
+        let (bpb, bw, bh) = match self {
+            Self::BlockCompressed {bytes_per_block, block_width, block_height,..} => 
+                (*bytes_per_block as u32, *block_width as u32, *block_height as u32),
+            _=> { return None }
+        };
+
+        let sx = (width / bw) as usize;
+        let sy = (height / bw) as usize;
+        sx.checked_mul(sy)?.checked_mul(bpb as usize)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,7 +87,10 @@ pub struct DxgiFormat {
 
 
 impl DxgiFormat {
-    // type def start
+    //-.-..-.-.-.-.-.-.-.-.-.--.-.-.-.-.-.-.-.-..--.-.-.-.-.-.-.-.-.-.-.-
+    // Type def start
+    //-.-..-.-.-.-.-.-.-.-.-.--.-.-.-.-.-.-.-.-..--.-.-.-.-.-.-.-.-.-.-.-
+
     pub const UNKNOWN: DxgiFormat = DxgiFormat {
         name: "UNKNOWN",
         value: 0,
@@ -1284,7 +1300,520 @@ impl DxgiFormat {
         },
     };
 
-    // type def end
+
+    //-.-..-.-.-.-.-.-.-.-.-.--.-.-.-.-.-.-.-.-..--.-.-.-.-.-.-.-.-.-.-.-
+    //NVIDIA ATSC extended enums for switch. These aren't valid
+    //DXGI formats for DDS, so are not included in `DXGI_FORMATS`
+    //-.-..-.-.-.-.-.-.-.-.-.--.-.-.-.-.-.-.-.-..--.-.-.-.-.-.-.-.-.-.-.-
+
+
+    pub const ASTC_4X4_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_4X4_TYPELESS",
+        value: 133,
+        description: "A 4x4 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
+    };
+
+    pub const ASTC_4X4_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_4X4_UNORM",
+        value: 134,
+        description: "A 4x4 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
+    };
+
+    pub const ASTC_4X4_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_4X4_UNORM_SRGB",
+        value: 135,
+        description: "A 4x4 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 8,
+            bytes_per_block: 16,
+            block_width: 4,
+            block_height: 4,
+        },
+    };
+
+    pub const ASTC_5X4_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_5X4_TYPELESS",
+        value: 137,
+        description: "A 5x4 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 6,
+            bytes_per_block: 16,
+            block_width: 5,
+            block_height: 4,
+        },
+    };
+
+    pub const ASTC_5X4_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_5X4_UNORM",
+        value: 138,
+        description: "A 5x4 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 6,
+            bytes_per_block: 16,
+            block_width: 5,
+            block_height: 4,
+        },
+    };
+
+    pub const ASTC_5X4_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_5X4_UNORM_SRGB",
+        value: 139,
+        description: "A 5x4 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 6,
+            bytes_per_block: 16,
+            block_width: 5,
+            block_height: 4,
+        },
+    };
+
+    pub const ASTC_5X5_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_5X5_TYPELESS",
+        value: 141,
+        description: "A 5x5 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 5,
+            bytes_per_block: 16,
+            block_width: 5,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_5X5_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_5X5_UNORM",
+        value: 142,
+        description: "A 5x5 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 5,
+            bytes_per_block: 16,
+            block_width: 5,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_5X5_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_5X5_UNORM_SRGB",
+        value: 143,
+        description: "A 5x5 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 5,
+            bytes_per_block: 16,
+            block_width: 5,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_6X5_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_6X5_TYPELESS",
+        value: 145,
+        description: "A 6x5 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 4,
+            bytes_per_block: 16,
+            block_width: 6,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_6X5_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_6X5_UNORM",
+        value: 146,
+        description: "A 6x5 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 4,
+            bytes_per_block: 16,
+            block_width: 6,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_6X5_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_6X5_UNORM_SRGB",
+        value: 147,
+        description: "A 6x5 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 4,
+            bytes_per_block: 16,
+            block_width: 6,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_6X6_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_6X6_TYPELESS",
+        value: 149,
+        description: "A 6x6 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 3,
+            bytes_per_block: 16,
+            block_width: 6,
+            block_height: 6,
+        },
+    };
+
+    pub const ASTC_6X6_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_6X6_UNORM",
+        value: 150,
+        description: "A 6x6 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 3,
+            bytes_per_block: 16,
+            block_width: 6,
+            block_height: 6,
+        },
+    };
+
+    pub const ASTC_6X6_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_6X6_UNORM_SRGB",
+        value: 151,
+        description: "A 6x6 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 3,
+            bytes_per_block: 16,
+            block_width: 6,
+            block_height: 6,
+        },
+    };
+
+    pub const ASTC_8X5_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_8X5_TYPELESS",
+        value: 153,
+        description: "An 8x5 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 3,
+            bytes_per_block: 16,
+            block_width: 8,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_8X5_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_8X5_UNORM",
+        value: 154,
+        description: "An 8x5 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 3,
+            bytes_per_block: 16,
+            block_width: 8,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_8X5_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_8X5_UNORM_SRGB",
+        value: 155,
+        description: "An 8x5 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 3,
+            bytes_per_block: 16,
+            block_width: 8,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_8X6_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_8X6_TYPELESS",
+        value: 157,
+        description: "An 8x6 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 8,
+            block_height: 6,
+        },
+    };
+
+    pub const ASTC_8X6_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_8X6_UNORM",
+        value: 158,
+        description: "An 8x6 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 8,
+            block_height: 6,
+        },
+    };
+
+    pub const ASTC_8X6_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_8X6_UNORM_SRGB",
+        value: 159,
+        description: "An 8x6 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 8,
+            block_height: 6,
+        },
+    };
+
+    pub const ASTC_8X8_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_8X8_TYPELESS",
+        value: 161,
+        description: "An 8x8 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 8,
+            block_height: 8,
+        },
+    };
+
+    pub const ASTC_8X8_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_8X8_UNORM",
+        value: 162,
+        description: "An 8x8 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 8,
+            block_height: 8,
+        },
+    };
+
+    pub const ASTC_8X8_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_8X8_UNORM_SRGB",
+        value: 163,
+        description: "An 8x8 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 8,
+            block_height: 8,
+        },
+    };
+
+    pub const ASTC_10X5_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X5_TYPELESS",
+        value: 165,
+        description: "A 10x5 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_10X5_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X5_UNORM",
+        value: 166,
+        description: "A 10x5 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_10X5_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X5_UNORM_SRGB",
+        value: 167,
+        description: "A 10x5 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 5,
+        },
+    };
+
+    pub const ASTC_10X6_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X6_TYPELESS",
+        value: 169,
+        description: "A 10x6 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 6,
+        },
+    };
+
+    pub const ASTC_10X6_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X6_UNORM",
+        value: 170,
+        description: "A 10x6 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 6,
+        },
+    };
+
+    pub const ASTC_10X6_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X6_UNORM_SRGB",
+        value: 171,
+        description: "A 10x6 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 2,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 6,
+        },
+    };
+
+    pub const ASTC_10X8_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X8_TYPELESS",
+        value: 173,
+        description: "A 10x8 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 1,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 8,
+        },
+    };
+
+    pub const ASTC_10X8_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X8_UNORM",
+        value: 174,
+        description: "A 10x8 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 1,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 8,
+        },
+    };
+
+    pub const ASTC_10X8_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X8_UNORM_SRGB",
+        value: 175,
+        description: "A 10x8 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 1,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 8,
+        },
+    };
+
+    pub const ASTC_10X10_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X10_TYPELESS",
+        value: 177,
+        description: "A 10x10 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 1,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 10,
+        },
+    };
+
+    pub const ASTC_10X10_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X10_UNORM",
+        value: 178,
+        description: "A 10x10 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 1,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 10,
+        },
+    };
+
+    pub const ASTC_10X10_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_10X10_UNORM_SRGB",
+        value: 179,
+        description: "A 10x10 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 1,
+            bytes_per_block: 16,
+            block_width: 10,
+            block_height: 10,
+        },
+    };
+
+    pub const ASTC_12X10_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_12X10_TYPELESS",
+        value: 181,
+        description: "A 12x10 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 1,
+            bytes_per_block: 16,
+            block_width: 12,
+            block_height: 10,
+        },
+    };
+
+    pub const ASTC_12X10_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_12X10_UNORM",
+        value: 182,
+        description: "A 12x10 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 1,
+            bytes_per_block: 16,
+            block_width: 12,
+            block_height: 10,
+        },
+    };
+
+    pub const ASTC_12X10_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_12X10_UNORM_SRGB",
+        value: 183,
+        description: "A 12x10 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 1,
+            bytes_per_block: 16,
+            block_width: 12,
+            block_height: 10,
+        },
+    };
+
+    pub const ASTC_12X12_TYPELESS: DxgiFormat = DxgiFormat {
+        name: "ASTC_12X12_TYPELESS",
+        value: 185,
+        description: "A 12x12 block-compressed typeless format using 128 bits per block.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 0,
+            bytes_per_block: 16,
+            block_width: 12,
+            block_height: 12,
+        },
+    };
+
+    pub const ASTC_12X12_UNORM: DxgiFormat = DxgiFormat {
+        name: "ASTC_12X12_UNORM",
+        value: 186,
+        description: "A 12x12 block-compressed format with unsigned normalized color components.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 0,
+            bytes_per_block: 16,
+            block_width: 12,
+            block_height: 12,
+        },
+    };
+
+    pub const ASTC_12X12_UNORM_SRGB: DxgiFormat = DxgiFormat {
+        name: "ASTC_12X12_UNORM_SRGB",
+        value: 187,
+        description: "A 12x12 block-compressed format with unsigned normalized color components in sRGB color space.",
+        info: FormatInfo::BlockCompressed {
+            bits_per_texel: 0,
+            bytes_per_block: 16,
+            block_width: 12,
+            block_height: 12,
+        },
+    };
+
+    //-.-..-.-.-.-.-.-.-.-.-.--.-.-.-.-.-.-.-.-..--.-.-.-.-.-.-.-.-.-.-.-
+    // Type def end
+    //-.-..-.-.-.-.-.-.-.-.-.--.-.-.-.-.-.-.-.-..--.-.-.-.-.-.-.-.-.-.-.-
 
     pub const DXGI_FORMATS: &[DxgiFormat] = &[
         Self::UNKNOWN,
@@ -1463,6 +1992,12 @@ impl DxgiFormat {
             //38 - linear BC7, not in SoulsFormats for some reason?
             38 | 102 | 106 | 107 => Self::BC7_UNORM,
             112 => Self::BC7_UNORM_SRGB,
+
+            //SFNext note:
+            //Duskbloods (Switch 2) ASTC formats. The TPF's DXGI metadata field is
+            //used for these when present; these entries are a fallback only.
+            0xCF => Self::ASTC_8X8_UNORM,
+
             _=> Self::UNKNOWN
         }
     }
@@ -1493,7 +2028,9 @@ impl DxgiFormat {
             0 | 1 | 25 | 29 | 108 | 109 => "DXT1",
             3 => "DXT3",
             5 | 23 | 33 | 110 => "DXT5",
-            22 => "q\0\0\0", // 0x71
+            //SFNext note:
+            // 0x71 = D3DFMT_A16B16G16R16F; legacy fallback only — RGBA16 DXGI fields now get a DX10 header via DX10DXGI
+            22 => "q\0\0\0",  
             24 | 103 => "ATI1",
             104 => "ATI2",
             _ => return None,
@@ -1529,6 +2066,8 @@ impl DxgiFormat {
         matches!(
             id,
             29 | 65 | 72 | 75 | 78 | 86 | 91 | 93 | 94 | 95 | 96 | 97 | 98 | 99
+            // SFNext adds these for Duskbloods ?
+            | 10 | 11 | 12 | 13 | 14
         )
     }
 
@@ -1550,6 +2089,113 @@ impl DxgiFormat {
             8 | 9 | 10 | 105 => Some(4),
             _=> None
         }
+    }
+
+
+    // ---------------------------------------------------------------------------
+    // ASTC stuff.
+    // ---------------------------------------------------------------------------
+
+
+    ///NVIDIA's extended ASTC formats. They aren't valid DXGI formats for DDS so they aren't in
+    /// `DXGI_FORMATS`. Ordered the same as the Vulkan ASTC formats.
+    pub const ASTC_FORMATS: &[DxgiFormat] = &[
+        Self::ASTC_4X4_TYPELESS,
+        Self::ASTC_4X4_UNORM,
+        Self::ASTC_4X4_UNORM_SRGB,
+        Self::ASTC_5X4_TYPELESS,
+        Self::ASTC_5X4_UNORM,
+        Self::ASTC_5X4_UNORM_SRGB,
+        Self::ASTC_5X5_TYPELESS,
+        Self::ASTC_5X5_UNORM,
+        Self::ASTC_5X5_UNORM_SRGB,
+        Self::ASTC_6X5_TYPELESS,
+        Self::ASTC_6X5_UNORM,
+        Self::ASTC_6X5_UNORM_SRGB,
+        Self::ASTC_6X6_TYPELESS,
+        Self::ASTC_6X6_UNORM,
+        Self::ASTC_6X6_UNORM_SRGB,
+        Self::ASTC_8X5_TYPELESS,
+        Self::ASTC_8X5_UNORM,
+        Self::ASTC_8X5_UNORM_SRGB,
+        Self::ASTC_8X6_TYPELESS,
+        Self::ASTC_8X6_UNORM,
+        Self::ASTC_8X6_UNORM_SRGB,
+        Self::ASTC_8X8_TYPELESS,
+        Self::ASTC_8X8_UNORM,
+        Self::ASTC_8X8_UNORM_SRGB,
+        Self::ASTC_10X5_TYPELESS,
+        Self::ASTC_10X5_UNORM,
+        Self::ASTC_10X5_UNORM_SRGB,
+        Self::ASTC_10X6_TYPELESS,
+        Self::ASTC_10X6_UNORM,
+        Self::ASTC_10X6_UNORM_SRGB,
+        Self::ASTC_10X8_TYPELESS,
+        Self::ASTC_10X8_UNORM,
+        Self::ASTC_10X8_UNORM_SRGB,
+        Self::ASTC_10X10_TYPELESS,
+        Self::ASTC_10X10_UNORM,
+        Self::ASTC_10X10_UNORM_SRGB,
+        Self::ASTC_12X10_TYPELESS,
+        Self::ASTC_12X10_UNORM,
+        Self::ASTC_12X10_UNORM_SRGB,
+        Self::ASTC_12X12_TYPELESS,
+        Self::ASTC_12X12_UNORM,
+        Self::ASTC_12X12_UNORM_SRGB,
+    ];
+
+    /// Like `from_id`, but also finds the extended ASTC ids. Use this for TPF / KTX2 metadata.
+    pub fn from_id_extended(id: u8) -> Result<DxgiFormat, FerrisoulsError> {
+        Self::from_id(id).or_else(|_| {
+            Self::ASTC_FORMATS
+                .iter()
+                .find(|f| f.value == id)
+                .copied()
+                .ok_or(FormatNotFound)
+        })
+    }
+
+    fn astc_index(&self) -> Option<usize> {
+        Self::ASTC_FORMATS.iter().position(|f| f.value == self.value)
+    }
+
+    /// True for any of the extended ASTC formats.
+    pub fn is_astc(&self) -> bool {
+        self.astc_index().is_some()
+    }
+
+    /// True for the sRGB ASTC formats.
+    pub fn is_astc_srgb(&self) -> bool {
+        self.astc_index().is_some_and(|i| i % 3 == 2)
+    }
+
+    /// The Vulkan / KTX2 `VkFormat` for an ASTC UNORM or SRGB format. `None` for typeless and non ASTC formats.
+    pub fn to_vulkan(&self) -> Option<u32> {
+        let index = self.astc_index()?;
+        let srgb = match index % 3 {
+            1 => 0,
+            2 => 1,
+            _ => return None,
+        };
+        //157 is `VK_FORMAT_ASTC_4x4_UNORM_BLOCK`. The Vulkan ASTC formats follow it in (UNORM, SRGB) pairs per footprint.
+        Some(157 + (index / 3) as u32 * 2 + srgb)
+    }
+
+    /// The ASTC format for a standard Vulkan ASTC `VkFormat`.
+    pub fn from_vulkan(vk_format: u32) -> Option<DxgiFormat> {
+        //157 is `VK_FORMAT_ASTC_4x4_UNORM_BLOCK`. The Vulkan ASTC formats follow it in (UNORM, SRGB) pairs per footprint.
+        let index = vk_format.checked_sub(157)? as usize;
+        Self::ASTC_FORMATS.get((index >> 1) * 3 + 1 + (index & 1)).copied()
+    }
+
+    /// The ASTC UNORM or SRGB format with the given block footprint.
+    pub fn astc_from_footprint(block_width: u8, block_height: u8, srgb: bool) -> Option<DxgiFormat> {
+        Self::ASTC_FORMATS
+            .iter()
+            .skip(1 + srgb as usize)
+            .step_by(3)
+            .find(|f| f.info.block_dimensions() == (block_width, block_height))
+            .copied()
     }
 }
 
@@ -1590,4 +2236,28 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn vulkan_mapping_roundtrips() {
+        let mut count = 0;
+        for f in DxgiFormat::ASTC_FORMATS {
+            match f.to_vulkan() {
+                Some(vk) => {
+                    assert_eq!(DxgiFormat::from_vulkan(vk), Some(*f), "{}", f.name());
+                    let (w, h) = f.info().block_dimensions();
+                    assert_eq!(DxgiFormat::astc_from_footprint(w, h, f.is_astc_srgb()), Some(*f));
+                    count += 1;
+                }
+                None => assert!(f.name().ends_with("TYPELESS")),
+            }
+        }
+        assert_eq!(count, 28);
+
+        assert_eq!(DxgiFormat::ASTC_4X4_UNORM.to_vulkan(), Some(157));
+        assert_eq!(DxgiFormat::ASTC_12X12_UNORM_SRGB.to_vulkan(), Some(184));
+        assert_eq!(DxgiFormat::from_vulkan(156), None);
+        assert_eq!(DxgiFormat::from_vulkan(185), None);
+        assert_eq!(DxgiFormat::BC7_UNORM.to_vulkan(), None);
+    }
 }
+

@@ -36,10 +36,7 @@ impl IO for BNDHeader {
 
         let entry_count = reader.read_i32()?;
         if entry_count < 0 {
-            return Err(BinaryReaderError::Custom(
-                    format!("Invalid BND entry count: {}", entry_count)
-                )
-            );
+            return Err(format!("Invalid BND entry count: {}", entry_count).into());
         }
 
         let root_path_offset = reader.read_i32()?;
@@ -188,9 +185,7 @@ impl BND {
 
         let root_file_path = if header.root_path_offset != 0 {
             if header.root_path_offset < 0 {
-                return Err(BinaryReaderError::Custom(
-                    format!("Invalid BND root path offset: {}", header.root_path_offset)
-                ));
+                return Err(format!("Invalid BND root path offset: {}", header.root_path_offset).into());
             }
             reader.step_in(header.root_path_offset as u64)?;
             let path = reader.read_ascii()?;

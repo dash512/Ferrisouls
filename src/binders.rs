@@ -45,7 +45,7 @@ impl BinderVersion {
             Self::V2 => 2,
             Self::V3 => 3, 
             Self::V4 => 4,
-            Self::VARIABLE => { return Err(FerrisoulsError::custom("Variable BinderVersion has no integer form."))}
+            Self::VARIABLE => { return Err("Variable BinderVersion has no integer form.".into())}
         })
     }
 }

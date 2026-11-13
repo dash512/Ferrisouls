@@ -672,16 +672,12 @@ impl BinaryWriter {
         let res = *self
             .reservations
             .get(name)
-            .ok_or_else(|| BinaryWriterError::Custom(
-                format!("Reservation doesn't exist! Name: {}, Value: {:?}",
-                name, value)
-            ))?;
+            .ok_or_else(|| format!("Reservation doesn't exist! Name: {}, Value: {:?}", name, value))?;
 
         if T::SIZE != res.length {
             return Err(invalid(format!(
                 "Reservation '{name}' is {} bytes, but value is {} bytes",
-                res.length,
-                T::SIZE
+                res.length, T::SIZE
             )));
         }
 

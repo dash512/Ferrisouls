@@ -155,7 +155,7 @@ impl FMG {
         self.to_writer(&mut writer)?;
 
         let header = self.header
-            .ok_or_else(|| BinaryWriterError::custom("Entry has no BND4 entry header; cannot repack"))?;
+            .ok_or_else(|| "Entry has no BND4 entry header; cannot repack")?;
 
         Ok(BND4Entry {
             name: self.name.clone(),

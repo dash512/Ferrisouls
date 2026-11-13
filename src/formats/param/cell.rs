@@ -25,10 +25,7 @@ macro_rules! accessor {
         pub fn $name(&self) -> Result<$ty, FerrisoulsError> {
             match self {
                 CellValue::$variant(v) => Ok(v.clone()),
-                other => Err(FerrisoulsError::Custom(format!(
-                    "Cell value {other} is not of type {}",
-                    stringify!($variant)
-                ))),
+                other => Err(format!("Cell value {other} is not of type {}", stringify!($variant)).into())
             }
         }
     };
@@ -73,18 +70,16 @@ impl CellValue {
 
     pub fn coerce(self, def: &Field) -> Result<CellValue, FerrisoulsError> {
         fn int<T: TryFrom<i128>>(v: &CellValue, ty: &str) -> Result<T, FerrisoulsError> {
-            v.to_integer().and_then(|i| T::try_from(i).ok()).ok_or_else(|| {
-                FerrisoulsError::Custom(format!("Value {v} cannot be converted to {ty}"))
-            })
+            v.to_integer().and_then(|i| T::try_from(i).ok()).ok_or_else(|| format!("Value {v} cannot be converted to {ty}").into())
         }
         fn float(v: &CellValue, ty: &str) -> Result<f64, FerrisoulsError> {
             v.to_float()
-                .ok_or_else(|| FerrisoulsError::Custom(format!("Value {v} cannot be converted to {ty}")))
+                .ok_or_else(|| format!("Value {v} cannot be converted to {ty}").into())
         }
         fn bytes(v: CellValue) -> Result<CellValue, FerrisoulsError> {
             match v {
                 CellValue::Bytes(_) => Ok(v),
-                other => Err(FerrisoulsError::Custom(format!("Value {other} is not a byte array"))),
+                other => Err(format!("Value {other} is not a byte array").into()),
             }
         }
 
@@ -114,9 +109,7 @@ impl CellValue {
             }
             #[allow(unreachable_patterns)]
             other => {
-                return Err(FerrisoulsError::Custom(format!(
-                    "Conversion not specified for type {other:?}"
-                )))
+                return Err("Conversion not specified for type {other:?}".into())
             }
         })
     }

@@ -313,16 +313,13 @@ impl BXF4 {
         bdt.step_out()?;
 
         let data = if header.flags.is_compressed() {
-            let (data, _) = unsafe { Decompress::raw(&stored_data) }
-                .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
+            let (data, _) = unsafe { Decompress::raw(&stored_data) }?;
 
             let expected_size = header.uncompressed_size
-                .ok_or_else(|| BinaryReaderError::custom("Compressed BXF4 entry has no uncompressed size"))?;
+                .ok_or_else(|| "Compressed BXF4 entry has no uncompressed size")?;
 
             if data.len() != expected_size as usize {
-                return Err(BinaryReaderError::Custom(
-                    format!("Expected entry size of {}, got {}", expected_size, data.len())
-                ));
+                return Err(format!("Expected entry size of {}, got {}", expected_size, data.len()).into());
             }
 
             data
@@ -344,7 +341,7 @@ impl BXF4 {
         let stored_data = if entry.header.flags.is_compressed() {
             let compset = CompressSettings::Oodle(OodleSettings::KRAK);
             unsafe { Compress::raw(&entry.data, &compset) }
-                .map_err(|e| BinaryWriterError::Custom(e.to_string()))?
+                ?
         } else {
             entry.data.clone()
         };
@@ -379,11 +376,8 @@ impl SplitIO for BXF4 {
         let expected_entry_header_size = header.flags.get_entry_header_size();
  
         if header.entry_header_size != expected_entry_header_size as u64 {
-            return Err(BinaryReaderError::Custom(
-                format!("Invalid BXF4 entry header size: expected 0x{:X}, got 0x{:X}",
-                expected_entry_header_size,
-                header.entry_header_size
-            )));
+            return Err(format!("Invalid BXF4 entry header size: expected 0x{:X}, got 0x{:X}",
+                expected_entry_header_size, header.entry_header_size).into());
         }
  
         if header.extended == 4 {
@@ -391,9 +385,7 @@ impl SplitIO for BXF4 {
             BinderHashTable::from_reader(bhd)?; // not stored, just read to assert that it's correct
             bhd.step_out()?;
         } else if header.hash_table_offset != 0 {
-            return Err(BinaryReaderError::Custom(
-                format!("BXF4 has no hash table, but hash table offset is 0x{:X}", header.hash_table_offset)
-            ));
+            return Err(format!("BXF4 has no hash table, but hash table offset is 0x{:X}", header.hash_table_offset).into());
         }
  
         let mut entries = Vec::with_capacity(header.entry_count as usize);
@@ -442,9 +434,8 @@ impl SplitIO for BXF4 {
                 .iter()
                 .enumerate()
                 .map(|(index, entry)| {
-                    entry.name.clone().ok_or_else(|| {
-                        BinaryWriterError::Custom(format!("BXF4 entry {} requires a name for the hash table.", index))
-                    })
+                    entry.name.clone()
+                        .ok_or_else(|| format!("BXF4 entry {} requires a name for the hash table.", index))
                 })
                 .collect::<Result<_, _>>()?;
  

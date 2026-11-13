@@ -25,7 +25,7 @@ use std::borrow::Cow;
 use std::path::Path;
 
 use crate::binary::IO;
-use crate::errors::FerrisoulsError;
+use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 use crate::textures::dds::{AlphaMode, D3D10ResourceDimension, DDS, DDSCAPS, DDSCAPS2, DDSD, DDSPF, DX10Header, ResourceMisc};
 use crate::textures::dxgi::DxgiFormat;
 use crate::textures::swizzling::FormatLayout;
@@ -374,8 +374,8 @@ impl Bc {
     pub fn encode(self, img: &RgbaImage, quality: Quality) -> Result<Vec<u8>, FerrisoulsError> {
         let padded = img.padded_to_blocks();
         let p: &RgbaImage = &padded;
-        let w = u32::try_from(p.width).map_err(|_| FerrisoulsError::custom("Width exceeds encoder limit"))?;
-        let h = u32::try_from(p.height).map_err(|_| FerrisoulsError::custom("Height exceeds encoder limit"))?;
+        let w = u32::try_from(p.width)?;
+        let h = u32::try_from(p.height)?;
 
         let rgba = intel_tex_2::RgbaSurface { data: &p.data, width: w, height: h, stride: w * 4 };
 
@@ -429,7 +429,7 @@ impl Bc {
             }
 
             Self::Bc4 { .. } | Self::Bc5 { .. } | Self::Bc6h { .. } => {
-                return Err(FerrisoulsError::custom("Signed BC4/BC5/BC6H encoding is not supported"));
+                return Err("Signed BC4/BC5/BC6H encoding is not supported".into());
             }
         })
     }
@@ -496,9 +496,9 @@ impl RgbaImage {
             .width
             .checked_mul(self.height)
             .and_then(|n| n.checked_mul(4))
-            .ok_or_else(|| FerrisoulsError::custom("Image size overflow"))?;
+            .ok_or_else(|| "Image size overflow")?;
         if self.width == 0 || self.height == 0 || self.data.len() != expected {
-            return Err(FerrisoulsError::custom("Image data doesn't match its dimensions"));
+            return Err("Image data doesn't match its dimensions".into());
         }
         Ok(())
     }
@@ -536,24 +536,21 @@ impl RgbaImage {
 
     ///Decodes the first `width` x `height` surface of raw pixel data (no DDS header). Extra trailing
     /// bytes (mips, other slices) are ignored.
-    pub fn from_surface(data: &[u8], format: DxgiFormat, width: usize, height: usize) -> Result<Self, FerrisoulsError> {
+    pub fn from_surface(data: &[u8], format: DxgiFormat, width: usize, height: usize) -> Result<Self, BinaryReaderError> {
         if width == 0 || height == 0 {
-            return Err(FerrisoulsError::custom("Invalid texture dimensions"));
+            return Err("Invalid texture dimensions".into());
         }
-        let codec = Codec::of(format).ok_or_else(|| FerrisoulsError::custom(format!("Unsupported DXGI format: {format:?}")))?;
+        let codec = Codec::of(format).ok_or_else(|| format!("Unsupported DXGI format: {format:?}"))?;
         let required = codec
             .surface_len(width, height)
-            .ok_or_else(|| FerrisoulsError::custom("Required length overflow"))?;
-        let src = data.get(..required).ok_or_else(|| {
-            FerrisoulsError::custom(format!(
-                "Not enough data! Need {required} bytes for {width}x{height} {format:?}, have {}.",
-                data.len()
-            ))
-        })?;
+            .ok_or_else(|| "Required length overflow")?;
+        let src = data.get(..required).ok_or_else(|| -> BinaryReaderError {
+            format!("Not enough data! Need {required} bytes for {width}x{height} {format:?}, have {}.", data.len()).into() }
+        )?;
         let out_len = width
             .checked_mul(height)
             .and_then(|n| n.checked_mul(4))
-            .ok_or_else(|| FerrisoulsError::custom("Output length overflow"))?;
+            .ok_or_else(|| "Output length overflow")?;
 
         let out = match codec {
             Codec::Pixel(p) => {
@@ -594,11 +591,9 @@ impl RgbaImage {
     ///
     /// Uses `dds.data` as the pixel payload. If your reader leaves that empty, slice the file bytes
     /// at `dds.data_offset()` and call [`from_surface`](Self::from_surface) instead.
-    pub fn from_dds(dds: &DDS) -> Result<Self, FerrisoulsError> {
-        let width = usize::try_from(dds.header.width)
-            .map_err(|_| FerrisoulsError::custom("Invalid DDS width"))?;
-        let height = usize::try_from(dds.header.height)
-            .map_err(|_| FerrisoulsError::custom("Invalid DDS height"))?;
+    pub fn from_dds(dds: &DDS) -> Result<Self, BinaryReaderError> {
+        let width = usize::try_from(dds.header.width)?;
+        let height = usize::try_from(dds.header.height)?;
         Self::from_surface(&dds.data, dds.dxgi_format(), width, height)
     }
 
@@ -606,9 +601,9 @@ impl RgbaImage {
     ///
     /// Supports uncompressed and RLE true-color (24/32 bpp) and grayscale (8 bpp), any of the four
     /// origins. A 32 bpp file whose descriptor declares 0 alpha bits is treated as opaque, per the spec.
-    pub fn from_tga(bytes: &[u8]) -> Result<Self, FerrisoulsError> {
+    pub fn from_tga(bytes: &[u8]) -> Result<Self, BinaryReaderError> {
         if bytes.len() < 18 {
-            return Err(FerrisoulsError::custom("Truncated TGA header"));
+            return Err("Truncated TGA header".into());
         }
 
         let id_len = bytes[0] as usize;
@@ -626,17 +621,17 @@ impl RgbaImage {
             10 => (true, false),
             3 => (false, true),
             11 => (true, true),
-            t => return Err(FerrisoulsError::custom(format!("Unsupported TGA image type: {t}"))),
+            t => return Err(format!("Unsupported TGA image type: {t}").into()),
         };
         if width == 0 || height == 0 {
-            return Err(FerrisoulsError::custom("TGA has zero dimensions"));
+            return Err("TGA has zero dimensions".into());
         }
 
         let bytes_pp = match (gray, bpp) {
             (false, 24) => 3,
             (false, 32) => 4,
             (true, 8) => 1,
-            _ => return Err(FerrisoulsError::custom(format!("Unsupported TGA bit depth: {bpp}"))),
+            _ => return Err(format!("Unsupported TGA bit depth: {bpp}").into()),
         };
 
         // Skip the ID field and any (unused) color map.
@@ -648,15 +643,15 @@ impl RgbaImage {
         let total = width
             .checked_mul(height)
             .and_then(|n| n.checked_mul(bytes_pp))
-            .ok_or_else(|| FerrisoulsError::custom("TGA size overflow"))?;
+            .ok_or_else(|| "TGA size overflow")?;
 
         let rle_buf;
         let raw: &[u8] = if rle {
             rle_buf = decode_rle(bytes, pos, bytes_pp, total)?;
             &rle_buf
         } else {
-            let end = pos.checked_add(total).ok_or_else(|| FerrisoulsError::custom("TGA size overflow"))?;
-            bytes.get(pos..end).ok_or_else(|| FerrisoulsError::custom("Truncated TGA pixel data"))?
+            let end = pos.checked_add(total).ok_or_else(|| "TGA size overflow")?;
+            bytes.get(pos..end).ok_or_else(|| "Truncated TGA pixel data")?
         };
 
         let has_alpha = bytes_pp == 4 && desc & 0x0F != 0;
@@ -687,12 +682,12 @@ impl RgbaImage {
     }
 
     ///Decodes a PNG of any color type or bit depth into RGBA8.
-    pub fn from_png(bytes: &[u8]) -> Result<Self, FerrisoulsError> {
+    pub fn from_png(bytes: &[u8]) -> Result<Self, BinaryReaderError> {
         let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
         // palette/tRNS expanded, 16-bit stripped to 8-bit, low bit depths expanded
         decoder.set_transformations(png::Transformations::normalize_to_color8());
 
-        let mut reader = decoder.read_info().map_err(|e| FerrisoulsError::custom(e.to_string()))?;
+        let mut reader = decoder.read_info()?;
         let (width, height) = {
             let info = reader.info();
             (info.width as usize, info.height as usize)
@@ -701,12 +696,12 @@ impl RgbaImage {
         let buf_len = reader
             .output_line_size(width as u32)
             .and_then(|line| line.checked_mul(height))
-            .ok_or_else(|| FerrisoulsError::custom("PNG size overflow"))?;
+            .ok_or_else(|| "PNG size overflow")?;
         let mut buf = vec![0u8; buf_len];
 
-        let frame = reader.next_frame(&mut buf).map_err(|e| FerrisoulsError::custom(e.to_string()))?;
+        let frame = reader.next_frame(&mut buf)?;
         if frame.bit_depth != png::BitDepth::Eight {
-            return Err(FerrisoulsError::custom("Unexpected PNG bit depth after normalization"));
+            return Err("Unexpected PNG bit depth after normalization".into());
         }
 
         let channels = match frame.color_type {
@@ -714,7 +709,7 @@ impl RgbaImage {
             png::ColorType::GrayscaleAlpha => 2,
             png::ColorType::Rgb => 3,
             png::ColorType::Rgba => 4,
-            png::ColorType::Indexed => return Err(FerrisoulsError::custom("Indexed PNG was not expanded")),
+            png::ColorType::Indexed => return Err("Indexed PNG was not expanded".into()),
         };
 
         let mut data = Vec::with_capacity(width * height * 4);
@@ -738,9 +733,9 @@ impl RgbaImage {
 
     ///Encodes the top level only as raw pixel data in `format` (no header). This is what you want
     /// when injecting into a TPF/swizzled container.
-    pub fn to_surface(&self, format: DxgiFormat, quality: Quality) -> Result<Vec<u8>, FerrisoulsError> {
+    pub fn to_surface(&self, format: DxgiFormat, quality: Quality) -> Result<Vec<u8>, BinaryWriterError> {
         self.validate()?;
-        let codec = Codec::of(format).ok_or_else(|| FerrisoulsError::custom(format!("Unsupported DXGI format for encoding: {format:?}")))?;
+        let codec = Codec::of(format).ok_or_else(|| format!("Unsupported DXGI format for encoding: {format:?}"))?;
 
         let out = match codec {
             Codec::Pixel(p) => {
@@ -753,25 +748,25 @@ impl RgbaImage {
             Codec::Block(bc) => bc.encode(self, quality)?,
         };
 
-        let expected = codec.surface_len(self.width, self.height).ok_or_else(|| FerrisoulsError::custom("Surface size overflow"))?;
+        let expected = codec.surface_len(self.width, self.height).ok_or_else(|| "Surface size overflow")?;
         if out.len() != expected {
-            return Err(FerrisoulsError::custom(format!("{format:?} encoder produced {} bytes, expected {expected}", out.len())));
+            return Err(format!("{format:?} encoder produced {} bytes, expected {expected}", out.len()).into());
         }
         Ok(out)
     }
 
     ///Single-mip DDS in `format` with default quality.
-    pub fn to_dds(&self, format: DxgiFormat) -> Result<Vec<u8>, FerrisoulsError> {
+    pub fn to_dds(&self, format: DxgiFormat) -> Result<Vec<u8>, BinaryWriterError> {
         self.to_dds_with(format, EncodeOptions::default())
     }
 
     ///DDS in `format`. Always writes a DX10 header so the format is unambiguous.
-    pub fn to_dds_with(&self, format: DxgiFormat, opts: EncodeOptions) -> Result<Vec<u8>, FerrisoulsError> {
+    pub fn to_dds_with(&self, format: DxgiFormat, opts: EncodeOptions) -> Result<Vec<u8>, BinaryWriterError> {
         self.validate()?;
-        let codec = Codec::of(format).ok_or_else(|| FerrisoulsError::custom(format!("Unsupported DXGI format for DDS output: {format:?}")))?;
+        let codec = Codec::of(format).ok_or_else(|| format!("Unsupported DXGI format for DDS output: {format:?}"))?;
 
-        let width = i32::try_from(self.width).map_err(|_| FerrisoulsError::custom("Width exceeds DDS limit"))?;
-        let height = i32::try_from(self.height).map_err(|_| FerrisoulsError::custom("Height exceeds DDS limit"))?;
+        let width = i32::try_from(self.width)?;
+        let height = i32::try_from(self.height)?;
 
         let levels = if opts.mipmaps {
             (usize::BITS - self.width.max(self.height).leading_zeros()) as usize
@@ -793,7 +788,7 @@ impl RgbaImage {
         let (size_field, is_block) = match codec {
             Codec::Pixel(p) => (self.width * p.bytes(), false),
             Codec::Block(_) => (
-                codec.surface_len(self.width, self.height).ok_or_else(|| FerrisoulsError::custom("Surface size overflow"))?,
+                codec.surface_len(self.width, self.height).ok_or_else(|| "Surface size overflow")?,
                 true,
             ),
         };
@@ -804,8 +799,7 @@ impl RgbaImage {
         dds.header.flags = DDSD::get_required_flags() | if is_block { DDSD::LINEARSIZE } else { DDSD::PITCH };
         dds.header.height = height;
         dds.header.width = width;
-        dds.header.pitch_or_linear_size =
-            i32::try_from(size_field).map_err(|_| FerrisoulsError::custom("Texture size overflows the DDS header"))?;
+        dds.header.pitch_or_linear_size = i32::try_from(size_field)?;
         dds.header.depth = 0;
         dds.header.mipmap_count = levels as i32;
 
@@ -831,10 +825,10 @@ impl RgbaImage {
     }
 
     ///Encodes as TGA. Always top-left origin, 32 bpp with 8 alpha bits.
-    pub fn to_tga(&self) -> Result<Vec<u8>, FerrisoulsError> {
+    pub fn to_tga(&self) -> Result<Vec<u8>, BinaryWriterError> {
         self.validate()?;
-        let w = u16::try_from(self.width).map_err(|_| FerrisoulsError::custom("Width exceeds TGA limit"))?;
-        let h = u16::try_from(self.height).map_err(|_| FerrisoulsError::custom("Height exceeds TGA limit"))?;
+        let w = u16::try_from(self.width)?;
+        let h = u16::try_from(self.height)?;
 
         let mut header = [0u8; 18];
         header[2] = 2; // uncompressed true-color
@@ -850,19 +844,19 @@ impl RgbaImage {
     }
 
     ///Encodes as 8-bit RGBA PNG.
-    pub fn to_png(&self) -> Result<Vec<u8>, FerrisoulsError> {
+    pub fn to_png(&self) -> Result<Vec<u8>, BinaryWriterError> {
         self.validate()?;
-        let w = u32::try_from(self.width).map_err(|_| FerrisoulsError::custom("Width exceeds PNG limit"))?;
-        let h = u32::try_from(self.height).map_err(|_| FerrisoulsError::custom("Height exceeds PNG limit"))?;
+        let w = u32::try_from(self.width)?;
+        let h = u32::try_from(self.height)?;
 
         let mut buffer = Vec::new();
         let mut encoder = png::Encoder::new(&mut buffer, w, h);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
 
-        let mut writer = encoder.write_header().map_err(|e| FerrisoulsError::custom(e.to_string()))?;
-        writer.write_image_data(&self.data).map_err(|e| FerrisoulsError::custom(e.to_string()))?;
-        writer.finish().map_err(|e| FerrisoulsError::custom(e.to_string()))?;
+        let mut writer = encoder.write_header()?;
+        writer.write_image_data(&self.data)?;
+        writer.finish()?;
 
         Ok(buffer)
     }
@@ -933,17 +927,17 @@ impl RgbaImage {
 ///
 ///`x`, `y`, `width` and `height` must be multiples of 4, because BC blocks are 4x4 texels and are stored independently.
 pub fn crop_dds(dds: &DDS, x: u16, y: u16, width: u16, height: u16) -> Result<DDS, FerrisoulsError> {
-    let layout = FormatLayout::of(dds.dxgi_format()).map_err(FerrisoulsError::Custom)?;
+    let layout = FormatLayout::of(dds.dxgi_format())?;
     if layout.block_width != 4 || layout.block_height != 4 {
-        return Err(FerrisoulsError::custom("crop currently supports BC1 through BC7 formats only"));
+        return Err("crop currently supports BC1 through BC7 formats only".into());
     }
     let block_size = layout.bytes_per_block;
 
     if [x, y, width, height].iter().any(|v| v % 4 != 0) {
-        return Err(FerrisoulsError::custom("All input values for block compressed cropping should be divisible by 4!"));
+        return Err("All input values for block compressed cropping should be divisible by 4!".into());
     }
     if width == 0 || height == 0 {
-        return Err(FerrisoulsError::custom("Crop width and height must be positive!"));
+        return Err("Crop width and height must be positive!".into());
     }
 
     let src_width = dds.header.width as usize;
@@ -951,22 +945,22 @@ pub fn crop_dds(dds: &DDS, x: u16, y: u16, width: u16, height: u16) -> Result<DD
 
     let (x, y, width, height) = (x as usize, y as usize, width as usize, height as usize);
     if x + width > src_width || y + height > src_height {
-        return Err(FerrisoulsError::custom("Crop is too large!"));
+        return Err("Crop is too large!".into());
     }
 
     //cropping the top mip alone would invalidate the remaining mip chain
     if dds.header.mipmap_count > 1 {
-        return Err(FerrisoulsError::custom("Cropping mipmapped textures is not supported!"));
+        return Err("Cropping mipmapped textures is not supported!".into());
     }
 
     if dds.header.caps2.contains(DDSCAPS2::Cubemap)
         || dds.header.caps2.contains(DDSCAPS2::Volume)
         || dds.header.depth > 1 {
-        return Err(FerrisoulsError::custom("Cropping cubemaps, volume textures and texture arrays is not supported!"));
+        return Err("Cropping cubemaps, volume textures and texture arrays is not supported!".into());
     }
 
     if dds.dx10_header.as_ref().map(|h| h.array_size).unwrap_or(1) > 1 {
-        return Err(FerrisoulsError::custom("Cropping texture arrays is not supported!"));
+        return Err("Cropping texture arrays is not supported!".into());
     }
 
     let src_blocks_wide = src_width.div_ceil(4);
@@ -981,7 +975,7 @@ pub fn crop_dds(dds: &DDS, x: u16, y: u16, width: u16, height: u16) -> Result<DD
 
     let expected_src_len = src_row_bytes * src_blocks_high;
     if dds.data.len() < expected_src_len {
-        return Err(FerrisoulsError::custom("DDS texture data is truncated"));
+        return Err("DDS texture data is truncated".into());
     }
 
     let mut cropped_data = Vec::with_capacity(crop_row_bytes * crop_blocks_high);
@@ -999,8 +993,7 @@ pub fn crop_dds(dds: &DDS, x: u16, y: u16, width: u16, height: u16) -> Result<DD
 
     cropped.header.width = width as i32;
     cropped.header.height = height as i32;
-    cropped.header.pitch_or_linear_size = i32::try_from(cropped.data.len())
-        .map_err(|_| FerrisoulsError::custom("Cropped texture is too large for a DDS header."))?;
+    cropped.header.pitch_or_linear_size = i32::try_from(cropped.data.len())?;
     cropped.header.mipmap_count = 1;
     cropped.header.depth = 0;
 
@@ -1076,19 +1069,19 @@ fn decode_rle(src: &[u8], mut pos: usize, bytes_pp: usize, total: usize) -> Resu
     let mut raw = Vec::with_capacity(total.min(src.len().saturating_mul(128)));
 
     while raw.len() < total {
-        let header = *src.get(pos).ok_or_else(|| FerrisoulsError::custom("Truncated TGA RLE data"))?;
+        let header = *src.get(pos).ok_or_else(|| "Truncated TGA RLE data")?;
         pos += 1;
         let count = (header & 0x7F) as usize + 1;
 
         if header & 0x80 != 0 {
-            let px = src.get(pos..pos + bytes_pp).ok_or_else(|| FerrisoulsError::custom("Truncated TGA RLE data"))?;
+            let px = src.get(pos..pos + bytes_pp).ok_or_else(|| "Truncated TGA RLE data")?;
             pos += bytes_pp;
             for _ in 0..count {
                 raw.extend_from_slice(px);
             }
         } else {
             let n = count * bytes_pp;
-            raw.extend_from_slice(src.get(pos..pos + n).ok_or_else(|| FerrisoulsError::custom("Truncated TGA RLE data"))?);
+            raw.extend_from_slice(src.get(pos..pos + n).ok_or_else(|| "Truncated TGA RLE data")?);
             pos += n;
         }
     }

@@ -21,7 +21,7 @@
 use std::{ffi::c_void, path::{Path, PathBuf}, sync::OnceLock};
 use libloading::{Library, Symbol};
 
-use crate::errors::DCXError;
+use crate::errors::{DCXError, FerrisoulsError};
 use crate::oodle::bindings::*;
 use crate::oodle::structs::*;
 use crate::oodle::enums::*;
@@ -137,9 +137,9 @@ impl Oodle for Oodle26 {
         };
 
         if result == 0 {
-            Err(DCXError::Custom("Oodle returned 0 on decompression.".to_string()))
+            Err("Oodle returned 0 on decompression.".into())
         } else if result as usize > output.len() {
-            Err(DCXError::Custom("Oodle returned a size larger than the output buffer.".to_string()))
+            Err("Oodle returned a size larger than the output buffer.".into())
         } else {
             Ok(result as usize)
         }
@@ -166,7 +166,7 @@ impl Oodle for Oodle26 {
             )
         };
         if result == 0 {
-            Err(DCXError::Custom("Oodle returned 0 on decompression.".to_string()))
+            Err("Oodle returned 0 on decompression.".into())
         } else {
             Ok(result as usize)
         }
@@ -276,9 +276,9 @@ impl Oodle for Oodle28 {
         };
 
         if result == 0 {
-            Err(DCXError::Custom("Oodle returned 0 on decompression.".to_string()))
+            Err("Oodle returned 0 on decompression.".into())
         } else if result as usize > output.len() {
-            Err(DCXError::Custom("Oodle returned a size larger than the output buffer.".to_string()))
+            Err("Oodle returned a size larger than the output buffer.".into())
         } else {
             Ok(result as usize)
         }
@@ -305,7 +305,7 @@ impl Oodle for Oodle28 {
             )
         };
         if result == 0 {
-            Err(DCXError::Custom("Oodle returned 0 on decompression.".to_string()))
+            Err("Oodle returned 0 on decompression.".into())
         } else {
             Ok(result as usize)
         }
@@ -313,8 +313,8 @@ impl Oodle for Oodle28 {
 
     unsafe fn get_compressed_buffer_size(&self, raw_size: usize) -> Result<usize, DCXError> {
         match self.compressor {
-            None => Err(DCXError::Custom("Failed to get needed buffer size for compression: compressor was not given. 
-            Try setting it with `set_compressor`.".to_string())),
+            None => Err("Failed to get needed buffer size for compression: compressor was not given. 
+            Try setting it with `set_compressor`.".into()),
             Some(comp) => unsafe { 
                 Ok( (self.lz_get_comp_size)(comp, raw_size as isize) as usize )
             }
@@ -426,9 +426,9 @@ impl Oodle for Oodle29 {
         };
 
         if result == 0 {
-            Err(DCXError::Custom("Oodle returned 0 on decompression.".to_string()))
+            Err("Oodle returned 0 on decompression.".into())
         } else if result as usize > output.len() {
-            Err(DCXError::Custom("Oodle returned a size larger than the output buffer.".to_string()))
+            Err("Oodle returned a size larger than the output buffer.".into())
         } else {
             Ok(result as usize)
         }
@@ -455,7 +455,7 @@ impl Oodle for Oodle29 {
             )
         };
         if result == 0 {
-            Err(DCXError::Custom("Oodle returned 0 on decompression.".to_string()))
+            Err("Oodle returned 0 on decompression.".into())
         } else {
             Ok(result as usize)
         }
@@ -463,8 +463,8 @@ impl Oodle for Oodle29 {
 
     unsafe fn get_compressed_buffer_size(&self, raw_size: usize) -> Result<usize, DCXError> {
         match self.compressor {
-            None => Err(DCXError::Custom("Failed to get needed buffer size for compression: compressor was not given. 
-            Try setting it with `set_compressor`.".to_string())),
+            None => Err("Failed to get needed buffer size for compression: compressor was not given. 
+            Try setting it with `set_compressor`.".into()),
             Some(comp) => unsafe { 
                 Ok( (self.lz_get_comp_size)(comp, raw_size as isize) as usize )
             }
@@ -498,22 +498,22 @@ pub enum OodleType {
 
 impl OodleType {
     ///Decompresses `source` into `output`. Returns amount of bytes written.
-    pub unsafe fn decompress(&self, source: &[u8], output: &mut [u8]) -> Result<usize, DCXError> {
+    pub unsafe fn decompress(&self, source: &[u8], output: &mut [u8]) -> Result<usize, FerrisoulsError> {
         match self {
             OodleType::O26(inst) => unsafe {
-                inst.decompress(source, output) 
+                Ok(inst.decompress(source, output)?)
             },
             OodleType::O28(inst) => unsafe {
-                inst.decompress(source, output) 
+                Ok(inst.decompress(source, output)?)
             },
             OodleType::O29(inst) => unsafe {
-                inst.decompress(source, output)
+                Ok(inst.decompress(source, output)?)
             },
         }
     }
 
     ///Compresses and returns `input` as per `settings`.
-    pub unsafe fn compress(&self, input: &[u8], settings: OodleSettings) -> Result<Vec<u8>, DCXError> {
+    pub unsafe fn compress(&self, input: &[u8], settings: OodleSettings) -> Result<Vec<u8>, FerrisoulsError> {
         match self {
             OodleType::O26(inst) => unsafe {
                 let required_size = inst.get_compressed_buffer_size(input.len())?;
@@ -536,34 +536,18 @@ impl OodleType {
                 output.truncate(compressed_len);
                 Ok(output)
             },
-            _=> Err(DCXError::Custom(format!("Invalid Oodle compress settings: {:?} with {:?}", self, settings)))
+            _=> Err(format!("Invalid Oodle compress settings: {:?} with {:?}", self, settings).into())
         }
     }
 
-    pub unsafe fn load(path: &Path) -> Result<OodleType, String> {
+    pub unsafe fn load(path: &Path) -> Result<OodleType, FerrisoulsError> {
         match path.file_name().and_then(|name| name.to_str()) {
-            Some("oo2core_6_win64.dll") => unsafe {
-                Oodle26::load(path)
-                    .map(OodleType::O26)
-                    .map_err(|e| format!("Failed to load Oodle: {e}"))
-            },
-
-            Some("oo2core_8_win64.dll") => unsafe {
-                Oodle28::load(path)
-                    .map(OodleType::O28)
-                    .map_err(|e| format!("Failed to load Oodle: {e}"))
-            },
-
-            Some("oo2core_9_win64.dll") => unsafe {
-                Oodle29::load(path)
-                    .map(OodleType::O29)
-                    .map_err(|e| format!("Failed to load Oodle: {e}"))
-            },
-
-            _ => Err("Given file is not a valid Oodle library.".to_string()),
+            Some("oo2core_6_win64.dll") => unsafe { Ok(Oodle26::load(path).map(OodleType::O26)?) },
+            Some("oo2core_8_win64.dll") => unsafe { Ok(Oodle28::load(path).map(OodleType::O28)?) },
+            Some("oo2core_9_win64.dll") => unsafe { Ok(Oodle29::load(path).map(OodleType::O29)?) },
+            _ => Err("Given file is not a valid Oodle library.".into()),
         }
     }
-
 }
 
 
@@ -601,7 +585,7 @@ pub fn find_oodle() -> Option<PathBuf> {
 }
 
 ///Initialize an oodle instance for global use.
-pub unsafe fn init_oodle(path: &Path) -> Result<(), String> {
+pub unsafe fn init_oodle(path: &Path) -> Result<(), FerrisoulsError> {
     let oodle = unsafe { OodleType::load(path)? };
 
     OODLE
@@ -612,19 +596,19 @@ pub unsafe fn init_oodle(path: &Path) -> Result<(), String> {
 }
 
 ///Attempts to automatically find and load an Oodle library.
-pub unsafe fn auto_oodle() -> Result<(), String> {
+pub unsafe fn auto_oodle() -> Result<(), FerrisoulsError> {
     let path = unsafe {
         find_oodle()
-            .ok_or_else(|| "Couldn't find Oodle. Please load it yourself with `init_oodle()`.".to_string())?
+            .ok_or_else(|| "Couldn't find Oodle. Please load it yourself with `init_oodle()`.")?
     };
     unsafe { init_oodle(path.as_path()) }
 }
 
 ///Returns an OodleType instance which can be used for de/compression. Errors if Oodle hasn't been loaded yet.
-pub fn get_oodle() -> Result<&'static OodleType, DCXError> {
+pub fn get_oodle() -> Result<&'static OodleType, FerrisoulsError> {
     OODLE
         .get()
-        .ok_or_else(|| { DCXError::custom("Oodle has not been loaded. Call init_oodle() first.") })
+        .ok_or_else(|| "Oodle has not been loaded. Call init_oodle() first.".into())
 }
 
 ///Returns `true` if an Oodle instance is currently loaded.
@@ -636,15 +620,12 @@ pub fn is_oodle_loaded() -> bool {
 
 
 ///Decompresses `source` into `output`. Returns amount of bytes written.
-pub unsafe fn decompress(source: &[u8], output: &mut [u8]) -> Result<usize, DCXError> {
+pub unsafe fn decompress(source: &[u8], output: &mut [u8]) -> Result<usize, FerrisoulsError> {
     let oodle = match get_oodle() {
         Ok(oodle) => oodle,
         Err(_) => {
             eprintln!("Oodle not loaded, attempting to load automatically...");
-            unsafe {
-                auto_oodle()
-                    .map_err(|e| DCXError::custom(e))?;
-            }
+            unsafe { auto_oodle()?; }
             get_oodle()?
         }
     };
@@ -653,15 +634,12 @@ pub unsafe fn decompress(source: &[u8], output: &mut [u8]) -> Result<usize, DCXE
 }
 
 ///Compresses and returns `input` as per `settings`.
-pub unsafe fn compress(input: &[u8], settings: OodleSettings) -> Result<Vec<u8>, DCXError> {
+pub unsafe fn compress(input: &[u8], settings: OodleSettings) -> Result<Vec<u8>, FerrisoulsError> {
     let oodle = match get_oodle() {
         Ok(oodle) => oodle,
         Err(_) => {
             eprintln!("Oodle not loaded, attempting to load automatically...");
-            unsafe {
-                auto_oodle()
-                    .map_err(|e| DCXError::custom(e))?;
-            }
+            unsafe { auto_oodle()?; }
             get_oodle()?
         }
     };

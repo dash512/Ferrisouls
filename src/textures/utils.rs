@@ -4,7 +4,7 @@
 //! I could not have done this on my own so once again massive thanks and credit to those who came before me.
 
 use std::cmp;
-use crate::textures::dxgi::DxgiFormat;
+use crate::textures::{dxgi::DxgiFormat, swizzling::FormatLayout};
 
 pub trait MortonAlgorithms {
     ///Convert a Morton (Z-order) index to (x, y) block coordinates. 
@@ -530,27 +530,159 @@ impl PS5Util {
 }
 
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum SwitchVersion {
+    Switch1,
+    Switch2
+}
+
+impl SwitchVersion {
+    ///Order of 16-byte units inside a 512-byte GOB (64 bytes wide x 8 rows).
+    ///Each entry is `row * 4 + column`, indexed by position in the GOB.
+    pub fn gob(&self) -> [usize;32] {
+        match self {
+            Self::Switch1 => [
+                0, 4, 1, 5, 8, 12, 9, 13, 16, 20, 17, 21, 24, 28, 25, 29,
+                2, 6, 3, 7, 10, 14, 11, 15, 18, 22, 19, 23, 26, 30, 27, 31,
+            ],
+
+            Self::Switch2 => [
+                0, 4, 8, 12, 1, 5, 9, 13, 16, 20, 24, 28, 17, 21, 25, 29,
+                2, 6, 10, 14, 3, 7, 11, 15, 18, 22, 26, 30, 19, 23, 27, 31
+            ]
+        }
+    }
+}
+
 pub struct SwitchUtil;
 
 impl SwitchUtil {
-    /// Order of 16-byte units inside a 512-byte GOB (64 bytes wide x 8 rows).
-    /// Each entry is `row * 4 + column`, indexed by position in the GOB.
-    pub const SWITCH_GOB: [usize; 32] = [
-        0, 4, 1, 5, 8, 12, 9, 13, 16, 20, 17, 21, 24, 28, 25, 29,
-        2, 6, 3, 7, 10, 14, 11, 15, 18, 22, 19, 23, 26, 30, 27, 31,
-    ];
+    ///Maximum number of 8-row GOB groups handled per outer pass.
+    pub const MAX_GOB_BATCH: usize = 16;
 
-    /// Returns (rows of GOBs per block `num7`, elements per 16 bytes `num9`).
-    pub fn params(sy: usize, texels_per_block: usize) -> (usize, usize) {
-        let gob_height = (sy / 8).min(16);
-        let per_unit = match texels_per_block {
-            8 => 2,
-            4 => 4,
-            _ => 1, // 16 and anything else
-        };
-        (gob_height, per_unit)
+    pub fn validate_order(order: &[usize; 32]) -> bool {
+        let mut seen = [false; 32];
+        order.iter().all(|&e| e < 32 && !std::mem::replace(&mut seen[e], true))
     }
 
+    ///Number of block columns consumed per swizzle unit. Four of these make one
+    /// 64-byte-wide tile row (16B -> 1, 8B -> 2, 4B -> 4, 2B -> 8, 1B -> 16).
+    pub fn columns_per_unit(bytes_per_block: usize) -> usize {
+        (16 / bytes_per_block.max(1)).max(1)
+    }
+
+    ///Returns (max GOB groups per batch, block columns per swizzle unit).
+    pub fn params(sy: usize, bytes_per_block: usize) -> (usize, usize) {
+        let gob_height = (sy / 8).min(Self::MAX_GOB_BATCH);
+        (gob_height, Self::columns_per_unit(bytes_per_block))
+    }
+
+    ///Crops the top-left `tile_width` x `tile_height` pixel region out of a block
+    /// buffer whose full row is `buffer_width` pixels wide (port of ExtractTileASTC).
+    pub fn extract_tile_astc(tex: &[u8], block_bytes: usize, footprint_w: usize, footprint_h: usize, buffer_width: usize, tile_width: usize, tile_height: usize) -> Option<Vec<u8>> {
+        let padded_blocks_x = buffer_width / footprint_w;
+        let blocks_x = tile_width.div_ceil(footprint_w);
+        let blocks_y = tile_height.div_ceil(footprint_h);
+        let row_bytes = blocks_x.checked_mul(block_bytes)?;
+        let mut out = vec![0u8; row_bytes.checked_mul(blocks_y)?];
+
+        for y in 0..blocks_y {
+            let src = y * padded_blocks_x * block_bytes;
+            out[y * row_bytes..(y + 1) * row_bytes].copy_from_slice(tex.get(src..src + row_bytes)?);
+        }
+        Some(out)
+    }
+
+    ///Crops a `tile_width` x `tile_height` pixel region (from the top left) out of a block buffer whose
+    /// rows are `buffer_width` pixels wide. Works for non square block footprints (ExtractTileASTC).
+    pub fn extract_tile_blocks(layout: &FormatLayout, data: &[u8], buffer_width: i32, tile_width: i32, tile_height: i32) -> Result<Vec<u8>, &'static str> {
+        let bytes_per_block = layout.bytes_per_block;
+        let padded_blocks_x = buffer_width.max(0) as usize / layout.block_width;
+        let blocks_x = (tile_width.max(0) as usize).div_ceil(layout.block_width);
+        let blocks_y = (tile_height.max(0) as usize).div_ceil(layout.block_height);
+
+        let row_len = blocks_x * bytes_per_block;
+        let mut out = vec![0u8; row_len * blocks_y];
+        for y in 0..blocks_y {
+            let src = y * padded_blocks_x * bytes_per_block;
+            let row = data.get(src..src + row_len).ok_or("Tile extraction ran past the end of the buffer")?;
+            out[y * row_len..(y + 1) * row_len].copy_from_slice(row);
+        }
+        Ok(out)
+    }
+
+    ///Copies a tightly packed level into a buffer with the row stride and height of the tile aligned grid.
+    pub fn pad_to_swizzle_grid(layout: &FormatLayout, source: &[u8], width: i32, height: i32, de_w: i32, de_h: i32) -> Result<Vec<u8>, &'static str> {
+        let bytes_per_block = layout.bytes_per_block;
+        let src_blocks_x = (width.max(0) as usize).div_ceil(layout.block_width);
+        let src_blocks_y = (height.max(0) as usize).div_ceil(layout.block_height);
+        let dst_blocks_x = de_w.max(0) as usize / layout.block_width;
+        let dst_blocks_y = de_h.max(0) as usize / layout.block_height;
+
+        let src_row = src_blocks_x * bytes_per_block;
+        let dst_row = dst_blocks_x * bytes_per_block;
+        let total = dst_row.checked_mul(dst_blocks_y).ok_or("Switch 2 swizzle buffer size overflowed")?;
+
+        let mut out = vec![0u8; total];
+        for y in 0..src_blocks_y.min(dst_blocks_y) {
+            let s = y * src_row;
+            if s >= source.len() {
+                break;
+            }
+            let n = src_row.min(dst_row).min(source.len() - s);
+            out[y * dst_row..y * dst_row + n].copy_from_slice(&source[s..s + n]);
+        }
+        Ok(out)
+    }
+
+    ///Size of a level as written. Single mip, single slice textures pad block rows to a multiple of 128
+    /// instead of the next power of two when that is smaller.
+    pub fn get_write_size(layout: &FormatLayout, width: i32, height: i32, single_level_single_slice: bool) -> Result<(u64, i32, i32), &'static str> {
+        let (mut size, de_w, mut de_h) = Self::get_deswizzle_size_wh(layout, width, height)?;
+
+        if single_level_single_slice {
+            let block_rows = (height as usize).div_ceil(layout.block_height);
+            let mut padded_rows = de_h as usize / layout.block_height;
+            let mult128 = ((block_rows + 127) / 128 * 128).max(8);
+            if mult128 < padded_rows {
+                padded_rows = mult128;
+                de_h = (padded_rows * layout.block_height) as i32;
+                size = (de_w as u64 / layout.block_width as u64) * layout.bytes_per_block as u64 * padded_rows as u64;
+            }
+        }
+
+        Ok((size, de_w, de_h))
+    }
+
+    ///Get swizzle size with pixel block width and height instead of assuming square texels.
+    /// Returns (buffer length, deswizzle width, deswizzle height).
+    pub fn get_deswizzle_size_wh(layout: &FormatLayout, width: i32, height: i32) -> Result<(u64, i32, i32), &'static str> {
+        let bytes_per_block = layout.bytes_per_block;
+        if bytes_per_block == 0 || layout.block_width == 0 || layout.block_height == 0 || width <= 0 || height <= 0 {
+            return Err("Invalid dimensions or format for Switch 2 deswizzling");
+        }
+
+        // Block columns, padded so that each block row is a multiple of 64 bytes wide
+        let blocks_per_row_min = (64 / bytes_per_block).max(1);
+        let blocks_x = (width as usize)
+            .div_ceil(layout.block_width)
+            .next_multiple_of(blocks_per_row_min)
+            .max(blocks_per_row_min);
+
+        // Block rows, padded to the next power of two (minimum of one full tile)
+        let blocks_y = (height as usize).div_ceil(layout.block_height).max(8).next_power_of_two();
+
+        let de_w = blocks_x.checked_mul(layout.block_width).and_then(|v| i32::try_from(v).ok());
+        let de_h = blocks_y.checked_mul(layout.block_height).and_then(|v| i32::try_from(v).ok());
+        let size = (blocks_x as u64)
+            .checked_mul(bytes_per_block as u64)
+            .and_then(|v| v.checked_mul(blocks_y as u64));
+
+        match (size, de_w, de_h) {
+            (Some(size), Some(w), Some(h)) => Ok((size, w, h)),
+            _ => Err("Switch 2 deswizzle size overflowed"),
+        }
+    }
 }
 
 
@@ -800,6 +932,62 @@ impl Util {
 
         (width, height)
     }
+
+    ///(blocks_x, blocks_y, padded_x, padded_y), all in blocks.
+    pub fn padded_grid(width: u32, height: u32, bw: usize, bh: usize, bpb: usize) -> (usize, usize, usize, usize) {
+        let blocks_x = (width as usize).div_ceil(bw);
+        let blocks_y = (height as usize).div_ceil(bh);
+        let unit_cols = 4 * SwitchUtil::columns_per_unit(bpb);
+        (blocks_x, blocks_y, blocks_x.next_multiple_of(unit_cols), blocks_y.next_multiple_of(8))
+    }
+
+    ///Pad bytes to a minimum length and return as a vector.
+    pub fn expand_array(data: &[u8], min_size: usize) -> Vec<u8> {
+        let mut vector = data.to_vec();
+
+        if vector.len() < min_size {
+            vector.resize(min_size, 0);
+        }
+        vector
+    }
+
+    ///Calculate linear buffer size in bytes.
+    /// 
+    ///`bits_per_texel * width * height / 8`, floored by `min` and `at_least`.
+    pub fn calc_buffer_size(bits_per_texel: usize, width: u32, height: u32, min: usize, at_least: usize) -> Option<usize> {
+        let size = (width as usize)
+            .checked_mul(height as usize)?
+            .checked_mul(bits_per_texel)?
+            / 8;
+        Some(size.max(min).max(at_least))
+    }
+
+    /// Returns (minimum buffer length, deswizzle width, deswizzle height).
+    pub fn get_deswizzle_size(bits_per_texel: usize, width: i32, height: i32, min_block_width: i32, min_block_height: i32) -> Result<(u64, i32, i32), &'static str> {
+        if bits_per_texel == 0 || width <= 0 || height <= 0 || min_block_width <= 0 || min_block_height <= 0 {
+            return Err("Invalid dimensions or format for deswizzling");
+        }
+
+        fn round_up(value: i32, alignment: i32) -> Option<i32> {
+            value.checked_add(alignment - 1)?.checked_div(alignment)?.checked_mul(alignment)
+        }
+
+        let de_w = round_up(width, min_block_width)
+            .ok_or("Deswizzle dimension overflow")?
+            .max(min_block_width);
+        let de_h = round_up(height, min_block_height)
+            .ok_or("Deswizzle dimension overflow")?
+            .max(min_block_height);
+
+        let size = (bits_per_texel as u64)
+            .checked_mul(de_w as u64)
+            .and_then(|v| v.checked_mul(de_h as u64))
+            .ok_or("Deswizzle buffer size overflow")?
+            / 8;
+
+        Ok((size, de_w, de_h))
+    }
+
 }
 
 

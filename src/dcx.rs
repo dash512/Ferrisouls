@@ -312,9 +312,7 @@ pub mod header_structs {
                 &compression_type,
                 b"ZSTD" | b"EDGE" | b"DFLT" | b"KRAK"
             ) {
-                return Err(BinaryReaderError::Custom(
-                    format!("Compression type `{:?}` is Invalid!", compression_type)
-                ));
+                return Err(format!("Compression type `{:?}` is Invalid!", compression_type).into());
             }
 
             reader.assert::<u32>(0x20)?; //unk3
@@ -344,7 +342,7 @@ pub mod header_structs {
         // Expects a 68 byte header from a file, which is then parsed into a DCXHeader instance
         fn from_bytes(buffer: &[u8]) -> Result<Self, BinaryReaderError> {
             if buffer.len() < 68 {
-                return Err(BinaryReaderError::custom("Invalid Header Size!"));
+                return Err("Invalid Header Size!".into());
             }
             Self::from_reader(&mut BinaryReader::new(buffer, true, false))
         }
@@ -353,14 +351,7 @@ pub mod header_structs {
             let mut file = File::open(path)?;
 
             let mut buffer = [0u8; 68];
-            file.read_exact(&mut buffer)
-                .map_err(|e| {
-                    BinaryReaderError::Custom(
-                        format!("Failed to read DCX header: {e}")
-                    )
-                }
-            )?;
-
+            file.read_exact(&mut buffer)?;
 
             Self::from_bytes(&buffer)
         }
@@ -854,8 +845,7 @@ impl Decompress {
     pub fn zlib(stored: &[u8]) -> Result<Vec<u8>, BinaryReaderError> {
         let mut data = Vec::new();
         ZlibDecoder::new(stored)
-            .read_to_end(&mut data)
-            .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
+            .read_to_end(&mut data)?;
         Ok(data) 
     }
 
@@ -1214,10 +1204,8 @@ impl Compress {
     ///Compresses raw bytes with Zlib. Does not include DCX magic or header. 
     pub fn zlib(raw_buffer: &[u8]) -> Result<Vec<u8>, FerrisoulsError> {
         let mut encoder = ZlibEncoder::new(Vec::new(), ZCompression::best());
-        encoder.write_all(raw_buffer)
-            .map_err(|e| FerrisoulsError::Custom(e.to_string()))?;
-        encoder.finish()
-            .map_err(|e| FerrisoulsError::Custom(e.to_string()))
+        encoder.write_all(raw_buffer)?;
+        Ok(encoder.finish()?)
     }
 
     ///Special compression handling for DCX_EDGE type.
@@ -1501,7 +1489,7 @@ impl Compress {
                 Ok(output)
             }
 
-            _ => Err(DCXError::custom("This should never throw.").into())
+            _ => Err("This should never throw.".into())
         }
     }
 

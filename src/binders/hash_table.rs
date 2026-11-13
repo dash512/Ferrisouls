@@ -38,31 +38,18 @@ impl BinderHashTable {
 
         for group in &self.groups {
             if group.index != expected_index {
-                return Err(BinaryWriterError::Custom(
-                    format!(
-                        "Invalid hash group index: expected {}, got {}",
-                        expected_index, group.index
-                    )
-                ));
+                return Err(format!("Invalid hash group index: expected {}, got {}", expected_index, group.index).into());
             }
 
             if group.length < 0 {
-                return Err(BinaryWriterError::Custom(
-                    "Hash group has negative length.".to_string()
-                ));
+                return Err("Hash group has negative length.".into());
             }
 
             expected_index += group.length;
         }
 
         if expected_index as usize != self.hashes.len() {
-            return Err(BinaryWriterError::Custom(
-                format!(
-                    "Hash group lengths total {}, but there are {} hashes.",
-                    expected_index,
-                    self.hashes.len()
-                )
-            ));
+            return Err(format!("Hash group lengths total {}, but there are {} hashes.", expected_index, self.hashes.len()).into());
         }
 
         Ok(())
@@ -93,9 +80,7 @@ impl IO for BinderHashTable {
             .iter()
             .map(|g| {
                 if g.length < 0 {
-                    return Err(BinaryReaderError::Custom(
-                        format!("Invalid negative hash-group length: {}", g.length)
-                    ));
+                    return Err(BinaryReaderError::Custom(format!("Invalid negative hash-group length: {}", g.length)));
                 }
                 Ok(g.length as usize)
             })
@@ -207,7 +192,7 @@ fn find_hash_group_count(file_count: usize) -> Result<usize, BinaryWriterError> 
         }
     }
 
-    Err(BinaryWriterError::custom("Could not determine hash group count."))
+    Err("Could not determine hash group count.".into())
 }
 
 

@@ -58,8 +58,7 @@ pub trait IO {
     unsafe fn read(path: &Path) -> Result<(Self, DCXType), BinaryReaderError>
     where Self: Sized {
         let data = std::fs::read(path)?;
-        let (bytes, dt) = unsafe { decompress_if_needed(&data) }
-            .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
+        let (bytes, dt) = unsafe { decompress_if_needed(&data) }?;
         Ok((Self::from_bytes(&bytes)?, dt))
     }
 
@@ -88,10 +87,9 @@ pub trait IO {
     ///Writes self as bytes to a specified path, raises error if the file already exists.
     fn to_file(&mut self, path: &Path) -> Result<(), BinaryWriterError> {
         let bytes = self.to_bytes()?;
-        let mut file = File::create_new(path)
-            .map_err(|e| BinaryWriterError::custom(format!("{}: {}", path.display(), e)))?;
+        let mut file = File::create_new(path)?;
 
-        file.write_all(&bytes).map_err(BinaryWriterError::io)?;
+        file.write_all(&bytes)?;
 
         Ok(())
     }
@@ -103,12 +101,10 @@ pub trait IO {
     /// Function could call Oodle for DCX_KRAK compression. Safety cannot be guaranteed for an external library.
     unsafe fn write(&mut self, path: &Path, settings: CompressSettings) -> Result<(), BinaryWriterError> {
         let bytes = self.to_bytes()?;
-        let compressed = unsafe { Compress::raw(&bytes, &settings) }
-            .map_err(|e| BinaryWriterError::Custom(e.to_string()))?;
+        let compressed = unsafe { Compress::raw(&bytes, &settings) }?;
 
-        let mut file = File::create_new(path)
-            .map_err(|e| BinaryWriterError::custom(format!("{}: {}", path.display(), e)))?;
-        file.write_all(&compressed).map_err(BinaryWriterError::io)?;
+        let mut file = File::create_new(path)?;
+        file.write_all(&compressed)?;
 
         Ok(())
     }
@@ -152,10 +148,8 @@ pub trait SplitIO {
         let bhd_data = std::fs::read(bhd_path)?;
         let bdt_data = std::fs::read(bdt_path)?;
 
-        let (bhd_bytes, bhd_dt) = unsafe { decompress_if_needed(&bhd_data) }
-            .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
-        let (bdt_bytes, bdt_dt) = unsafe { decompress_if_needed(&bdt_data) }
-            .map_err(|e| BinaryReaderError::Custom(e.to_string()))?;
+        let (bhd_bytes, bhd_dt) = unsafe { decompress_if_needed(&bhd_data) }?;
+        let (bdt_bytes, bdt_dt) = unsafe { decompress_if_needed(&bdt_data) }?;
 
         Ok((Self::from_bytes(&bhd_bytes, &bdt_bytes)?, bhd_dt, bdt_dt))
     }
@@ -184,13 +178,11 @@ pub trait SplitIO {
     fn to_files(&mut self, bhd_path: &Path, bdt_path: &Path) -> Result<(), BinaryWriterError> {
         let (bhd_bytes, bdt_bytes) = self.to_bytes()?;
 
-        let mut bhd_file = File::create_new(bhd_path)
-            .map_err(|e| BinaryWriterError::custom(format!("{}: {}", bhd_path.display(), e)))?;
-        let mut bdt_file = File::create_new(bdt_path)
-            .map_err(|e| BinaryWriterError::custom(format!("{}: {}", bdt_path.display(), e)))?;
+        let mut bhd_file = File::create_new(bhd_path)?;
+        let mut bdt_file = File::create_new(bdt_path)?;
 
-        bhd_file.write_all(&bhd_bytes).map_err(BinaryWriterError::io)?;
-        bdt_file.write_all(&bdt_bytes).map_err(BinaryWriterError::io)?;
+        bhd_file.write_all(&bhd_bytes)?;
+        bdt_file.write_all(&bdt_bytes)?;
 
         Ok(())
     }
@@ -203,18 +195,14 @@ pub trait SplitIO {
     unsafe fn write(&mut self, bhd_path: &Path, bdt_path: &Path, bhd_settings: CompressSettings, bdt_settings: CompressSettings) -> Result<(), BinaryWriterError> {
         let (bhd_bytes, bdt_bytes) = self.to_bytes()?;
 
-        let bhd_compressed = unsafe { Compress::raw(&bhd_bytes, &bhd_settings) }
-            .map_err(|e| BinaryWriterError::Custom(e.to_string()))?;
-        let bdt_compressed = unsafe { Compress::raw(&bdt_bytes, &bdt_settings) }
-            .map_err(|e| BinaryWriterError::Custom(e.to_string()))?;
+        let bhd_compressed = unsafe { Compress::raw(&bhd_bytes, &bhd_settings) }?;
+        let bdt_compressed = unsafe { Compress::raw(&bdt_bytes, &bdt_settings) }?;
 
-        let mut bhd_file = File::create_new(bhd_path)
-            .map_err(|e| BinaryWriterError::custom(format!("{}: {}", bhd_path.display(), e)))?;
-        let mut bdt_file = File::create_new(bdt_path)
-            .map_err(|e| BinaryWriterError::custom(format!("{}: {}", bdt_path.display(), e)))?;
+        let mut bhd_file = File::create_new(bhd_path)?;
+        let mut bdt_file = File::create_new(bdt_path)?;
 
-        bhd_file.write_all(&bhd_compressed).map_err(BinaryWriterError::io)?;
-        bdt_file.write_all(&bdt_compressed).map_err(BinaryWriterError::io)?;
+        bhd_file.write_all(&bhd_compressed)?;
+        bdt_file.write_all(&bdt_compressed)?;
 
         Ok(())
     }

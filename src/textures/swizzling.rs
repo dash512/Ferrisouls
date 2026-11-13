@@ -6,7 +6,7 @@
 //! None of this could I have done on my own so massive credit to [Shadowth117](https://github.com/Shadowth117/).
 
 use crate::textures::dxgi::DxgiFormat;
-use crate::textures::utils::{Morton8, MortonAlgorithms, PS5Util, SwitchUtil, VitaUtil, Xbox360Util};
+use crate::textures::utils::{Morton8, MortonAlgorithms, Util, PS5Util, SwitchUtil, SwitchVersion, VitaUtil, Xbox360Util};
 use crate::errors::SwizzleError;
 
 
@@ -22,7 +22,7 @@ pub struct FormatLayout {
 impl FormatLayout {
     pub fn of(dxgi_format: DxgiFormat) -> Result<Self, String> {
         let info = dxgi_format.info();
-        let (bits_per_texel, bytes_per_block, _) = info.to_tuple().map_err(|e| e.to_string())?;
+        let (bits_per_texel, bytes_per_block, _) = info.to_tuple()?;
         let (block_width, block_height) = info.block_dimensions();
 
         if bits_per_texel == 0 || bytes_per_block == 0 || block_width == 0 || block_height == 0 {
@@ -55,16 +55,16 @@ impl Swizzler {
     ///Swizzle PS3 DDS bytes. Logic from Soulstruct.
     #[allow(non_snake_case)]
     pub fn PS3(deswizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32, min_data_size: usize) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::swizzle)?;
+        let layout = FormatLayout::of(dxgi_format)?;
         let bytes_per_block = layout.bytes_per_block;
 
         if bytes_per_block >= deswizzled.len() {
-            return Ok(pad_vec(deswizzled, min_data_size));
+            return Ok(Util::expand_array(deswizzled, min_data_size));
         }
 
-        let deswizzled = pad_vec(deswizzled, min_data_size);
+        let deswizzled = Util::expand_array(deswizzled, min_data_size);
 
-        let swizzled_size = calc_buffer_size(layout.bits_per_texel, width, height, 0, bytes_per_block)
+        let swizzled_size = Util::calc_buffer_size(layout.bits_per_texel, width, height, 0, bytes_per_block)
             .ok_or_else(|| swizzle_err("Linear texture size overflowed."))?;
         let mut swizzled = vec![0u8; swizzled_size];
 
@@ -90,7 +90,7 @@ impl Swizzler {
     ///Swizzle PS4 DDS bytes. `min_data_size` is `0x200usize` by default
     #[allow(non_snake_case)]
     pub fn PS4(deswizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32, min_data_size: usize) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::swizzle)?;
+        let layout = FormatLayout::of(dxgi_format)?;
         let bytes_per_block = layout.bytes_per_block;
 
         if bytes_per_block >= deswizzled.len() {
@@ -148,63 +148,78 @@ impl Swizzler {
     ///Swizzle PS5 DDS bytes. `depth` is 1 for 2D textures, `tile_mode` is typically 9.
     #[allow(non_snake_case)]
     pub fn PS5(deswizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32, depth: u32, tile_mode: u32) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::swizzle)?;
+        let layout = FormatLayout::of(dxgi_format)?;
 
-        PS5Util::transfer(deswizzled, layout.bytes_per_block, layout.block_width, width, height, depth, tile_mode, true)
-            .map_err(SwizzleError::swizzle)
+        Ok(PS5Util::transfer(deswizzled, layout.bytes_per_block, layout.block_width, width, height, depth, tile_mode, true)?)
+            
     }
 
     ///Swizzle Xbox360 DDS bytes.
     #[allow(non_snake_case)]
     pub fn Xbox360(deswizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::swizzle)?;
+        let layout = FormatLayout::of(dxgi_format)?;
 
         if layout.bytes_per_block >= deswizzled.len() {
             return Ok(deswizzled.to_vec());
         }
 
-        Xbox360Util::transfer(deswizzled, dxgi_format, width, height, layout.block_width, layout.bytes_per_block, false)
-            .map_err(SwizzleError::swizzle)
+        Ok(Xbox360Util::transfer(deswizzled, dxgi_format, width, height, layout.block_width, layout.bytes_per_block, false)?)
+            
     }
 
     ///Swizzle Switch DDS bytes.
     #[allow(non_snake_case)]
-    pub fn Switch(deswizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::swizzle)?;
+    pub fn Switch(deswizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32, min_buffer_size: usize, platform: SwitchVersion) -> Result<Vec<u8>, SwizzleError> {
+        let layout = FormatLayout::of(dxgi_format)?;
         let bytes_per_block = layout.bytes_per_block;
 
+        // Too short to swizzle: return as-is (but still honour the minimum size).
         if bytes_per_block >= deswizzled.len() {
-            return Ok(deswizzled.to_vec());
+            return Ok(Util::expand_array(deswizzled, min_buffer_size));
         }
+        let deswizzled = Util::expand_array(deswizzled, min_buffer_size);
 
-        let out_size = calc_buffer_size(layout.bits_per_texel, width, height, 0, bytes_per_block)
+        let (blocks_x, blocks_y, pad_x, pad_y) =
+            Util::padded_grid(width, height, layout.block_width, layout.block_height, bytes_per_block);
+
+        let out_size = pad_x 
+            .checked_mul(pad_y)
+            .and_then(|n| n.checked_mul(bytes_per_block))
             .ok_or_else(|| swizzle_err("Linear texture size overflowed."))?;
         let mut swizzled = vec![0u8; out_size];
 
-        let sy = height as usize / layout.block_height;
-        let sx = width as usize / layout.block_width;
+        let sx = pad_x;
+        let sy = pad_y;
+    
         let (gob_height, per_unit) = SwitchUtil::params(sy, bytes_per_block);
         if gob_height == 0 || per_unit == 0 {
             return Err(swizzle_err("Texture is too short to contain a single Switch GOB (8 block rows)."));
         }
 
+        let groups = sy / 8;
         let mut stream_pos = 0usize;
-        for i1 in 0..sy / 8 / gob_height {
-            for i2 in 0..sx / 4 / per_unit {
-                for i3 in 0..gob_height {
-                    for &gob_entry in SwitchUtil::SWITCH_GOB.iter() {
-                        for i5 in 0..per_unit {
-                            let row = (i1 * gob_height + i3) * 8 + gob_entry / 4;
-                            let col = (i2 * 4 + gob_entry % 4) * per_unit + i5;
-                            let src = bytes_per_block * (row * sx + col);
 
-                            let src_bytes = deswizzled
-                                .get(src..src + bytes_per_block)
-                                .ok_or_else(|| swizzle_err("Source offset out of range."))?;
-                            swizzled
-                                .get_mut(stream_pos..stream_pos + bytes_per_block)
-                                .ok_or_else(|| swizzle_err("Destination offset out of range."))?
-                                .copy_from_slice(src_bytes);
+        for i1 in 0..groups.div_ceil(gob_height) {
+            // The last batch may be shorter than gob_height.
+            let batch_count = gob_height.min(groups - i1 * gob_height);
+            for i2 in 0..sx / 4 / per_unit {
+                for i3 in 0..batch_count {
+                    for &gob_entry in platform.gob().iter() {
+                        for i5 in 0..per_unit {
+                            let src_y = (i1 * gob_height + i3) * 8 + gob_entry / 4;
+                            let src_x = (i2 * 4 + gob_entry % 4) * per_unit + i5;
+
+                            // Blocks outside the real image are padding: leave them zeroed.
+                            if src_x < blocks_x && src_y < blocks_y {
+                                let src = bytes_per_block * (src_y * blocks_x + src_x);
+                                let src_bytes = deswizzled
+                                    .get(src..src + bytes_per_block)
+                                    .ok_or_else(|| swizzle_err("Source offset out of range."))?;
+                                swizzled
+                                    .get_mut(stream_pos..stream_pos + bytes_per_block)
+                                    .ok_or_else(|| swizzle_err("Destination offset out of range."))?
+                                    .copy_from_slice(src_bytes);
+                            }
                             stream_pos += bytes_per_block;
                         }
                     }
@@ -217,14 +232,14 @@ impl Swizzler {
     ///Swizzle Vita DDS bytes.
     #[allow(non_snake_case)]
     pub fn Vita(deswizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::swizzle)?;
+        let layout = FormatLayout::of(dxgi_format)?;
         let bytes_per_block = layout.bytes_per_block;
 
         if bytes_per_block >= deswizzled.len() {
             return Ok(deswizzled.to_vec());
         }
 
-        let out_size = calc_buffer_size(layout.bits_per_texel, width, height, 0, bytes_per_block)
+        let out_size = Util::calc_buffer_size(layout.bits_per_texel, width, height, 0, bytes_per_block)
             .ok_or_else(|| swizzle_err("Linear texture size overflowed."))?;
         let mut swizzled = vec![0u8; out_size];
 
@@ -261,14 +276,14 @@ impl Deswizzler {
     ///Deswizzle PS3 DDS bytes. Logic from Soulstruct.
     #[allow(non_snake_case)]
     pub fn PS3(swizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::swizzle)?;
+        let layout = FormatLayout::of(dxgi_format)?;
         let bytes_per_block = layout.bytes_per_block;
 
         if bytes_per_block >= swizzled.len() {
             return Ok(swizzled.to_vec());
         }
 
-        let deswizzled_size = calc_buffer_size(layout.bits_per_texel, width, height, 0, bytes_per_block)
+        let deswizzled_size = Util::calc_buffer_size(layout.bits_per_texel, width, height, 0, bytes_per_block)
             .ok_or_else(|| deswizzle_err("Linear texture size overflowed."))?;
         let mut deswizzled = vec![0u8; deswizzled_size];
 
@@ -294,7 +309,7 @@ impl Deswizzler {
     ///Deswizzle PS4 DDS bytes.
     #[allow(non_snake_case)]
     pub fn PS4(swizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::deswizzle)?;
+        let layout = FormatLayout::of(dxgi_format)?;
         let bytes_per_block = layout.bytes_per_block;
 
         if bytes_per_block >= swizzled.len() {
@@ -342,65 +357,75 @@ impl Deswizzler {
     ///Deswizzle PS5 DDS bytes. `depth` is 1 for 2D textures, `tile_mode` is typically 9.
     #[allow(non_snake_case)]
     pub fn PS5(swizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32, depth: u32, tile_mode: u32) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::deswizzle)?;
+        let layout = FormatLayout::of(dxgi_format)?;
 
-        PS5Util::transfer(swizzled, layout.bytes_per_block, layout.block_width, width, height, depth, tile_mode, false)
-            .map_err(SwizzleError::deswizzle)
+        Ok(PS5Util::transfer(swizzled, layout.bytes_per_block, layout.block_width, width, height, depth, tile_mode, false)?)
+            
     }
 
     ///Deswizzle Xbox360 DDS bytes.
     #[allow(non_snake_case)]
     pub fn Xbox360(swizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::deswizzle)?;
+        let layout = FormatLayout::of(dxgi_format)?;
 
         if layout.bytes_per_block >= swizzled.len() {
             return Ok(swizzled.to_vec());
         }
 
-        Xbox360Util::transfer(swizzled, dxgi_format, width, height, layout.block_width, layout.bytes_per_block, true)
-            .map_err(SwizzleError::deswizzle)
+        Ok(Xbox360Util::transfer(swizzled, dxgi_format, width, height, layout.block_width, layout.bytes_per_block, true)?)
+            
     }
 
     ///Deswizzle Switch DDS bytes.
     #[allow(non_snake_case)]
-    pub fn Switch(swizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::deswizzle)?;
+    pub fn Switch(swizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32, platform: SwitchVersion) -> Result<Vec<u8>, SwizzleError> {
+        let layout = FormatLayout::of(dxgi_format)?;
         let bytes_per_block = layout.bytes_per_block;
 
         if bytes_per_block >= swizzled.len() {
             return Ok(swizzled.to_vec());
         }
 
-        let out_size = calc_buffer_size(layout.bits_per_texel, width, height, 0, bytes_per_block)
+        let (blocks_x, blocks_y, pad_x, pad_y) =
+            Util::padded_grid(width, height, layout.block_width, layout.block_height, bytes_per_block);
+
+        let out_size = blocks_x
+            .checked_mul(blocks_y)
+            .and_then(|n| n.checked_mul(bytes_per_block))
             .ok_or_else(|| deswizzle_err("Linear texture size overflowed."))?;
         let mut deswizzled = vec![0u8; out_size];
 
-        let sy = height as usize / layout.block_height;
-        let sx = width as usize / layout.block_width;
+        let sx = pad_x;
+        let sy = pad_y;
+
         let (gob_height, per_unit) = SwitchUtil::params(sy, bytes_per_block);
         if gob_height == 0 || per_unit == 0 {
             return Err(deswizzle_err("Texture is too short to contain a single Switch GOB (8 block rows)."));
         }
 
+        let groups = sy / 8;
         let mut stream_pos = 0usize;
-        for i1 in 0..sy / 8 / gob_height {
+
+        for i1 in 0..groups.div_ceil(gob_height) {
+            let batch_count = gob_height.min(groups - i1 * gob_height);
             for i2 in 0..sx / 4 / per_unit {
-                for i3 in 0..gob_height {
-                    for &gob_entry in SwitchUtil::SWITCH_GOB.iter() {
+                for i3 in 0..batch_count {
+                    for &gob_entry in platform.gob().iter() {
                         for i5 in 0..per_unit {
                             let src_bytes = swizzled
                                 .get(stream_pos..stream_pos + bytes_per_block)
                                 .ok_or_else(|| deswizzle_err("Source offset out of range."))?;
                             stream_pos += bytes_per_block;
-
+                            
                             let row = (i1 * gob_height + i3) * 8 + gob_entry / 4;
                             let col = (i2 * 4 + gob_entry % 4) * per_unit + i5;
-                            let dst = bytes_per_block * (row * sx + col);
-
-                            deswizzled
-                                .get_mut(dst..dst + bytes_per_block)
-                                .ok_or_else(|| deswizzle_err("Destination offset out of range."))?
-                                .copy_from_slice(src_bytes);
+                            if col < blocks_x && row < blocks_y {
+                                let dst = bytes_per_block * (row * blocks_x + col);
+                                deswizzled
+                                    .get_mut(dst..dst + bytes_per_block)
+                                    .ok_or_else(|| deswizzle_err("Destination offset out of range."))?
+                                    .copy_from_slice(src_bytes);
+                            }
                         }
                     }
                 }
@@ -412,14 +437,14 @@ impl Deswizzler {
     ///Deswizzle Vita DDS bytes.
     #[allow(non_snake_case)]
     pub fn Vita(swizzled: &[u8], dxgi_format: DxgiFormat, width: u32, height: u32) -> Result<Vec<u8>, SwizzleError> {
-        let layout = FormatLayout::of(dxgi_format).map_err(SwizzleError::deswizzle)?;
+        let layout = FormatLayout::of(dxgi_format)?;
         let bytes_per_block = layout.bytes_per_block;
 
         if bytes_per_block >= swizzled.len() {
             return Ok(swizzled.to_vec());
         }
 
-        let out_size = calc_buffer_size(layout.bits_per_texel, width, height, 0, bytes_per_block)
+        let out_size = Util::calc_buffer_size(layout.bits_per_texel, width, height, 0, bytes_per_block)
             .ok_or_else(|| deswizzle_err("Linear texture size overflowed."))?;
         let mut deswizzled = vec![0u8; out_size];
 
@@ -452,32 +477,46 @@ impl Deswizzler {
 }
 
 
-///Pad bytes to a minimum length and return as a vector.
-pub fn pad_vec(data: &[u8], min_size: usize) -> Vec<u8> {
-    let mut vector = data.to_vec();
-
-    if vector.len() < min_size {
-        vector.resize(min_size, 0);
-    }
-    vector
-}
-
-///Calculate linear buffer size in bytes.
-/// 
-///`bits_per_texel * width * height / 8`, floored by `min` and `at_least`.
-fn calc_buffer_size(bits_per_texel: usize, width: u32, height: u32, min: usize, at_least: usize) -> Option<usize> {
-    let size = (width as usize)
-        .checked_mul(height as usize)?
-        .checked_mul(bits_per_texel)?
-        / 8;
-    Some(size.max(min).max(at_least))
-}
-
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gob_tables_are_permutations() {
+        for p in [SwitchVersion::Switch1, SwitchVersion::Switch2] {
+            let mut t: Vec<_> = p.gob().to_vec();
+            t.sort();
+            assert_eq!(t, (0..32).collect::<Vec<_>>());
+        }
+    }
+
+    fn pattern(n: usize) -> Vec<u8> {
+        (0..n).map(|i| ((i as u32).wrapping_mul(2654435761) >> 24) as u8).collect()
+    }
+
+    #[test]
+    fn switch_roundtrips() {
+        let roundtrip = |fmt: DxgiFormat, w: u32, h: u32, p: SwitchVersion| {
+            let l = FormatLayout::of(fmt).unwrap();
+            let bx = (w as usize).div_ceil(l.block_width);
+            let by = (h as usize).div_ceil(l.block_height);
+            let src = pattern(bx * by * l.bytes_per_block);
+            let sw = Swizzler::Switch(&src, fmt, w, h, 0, p).unwrap();
+            let back = Deswizzler::Switch(&sw, fmt, w, h, p).unwrap();
+            assert_eq!(src, back, "{fmt:?} {w}x{h} {p:?}");
+        };
+
+        for p in [SwitchVersion::Switch1, SwitchVersion::Switch2] {
+            roundtrip(DxgiFormat::BC7_UNORM, 256, 256, p);   // 16B blocks
+            roundtrip(DxgiFormat::BC7_UNORM, 256, 640, p);   // 20 GOB rows: partial batch
+            roundtrip(DxgiFormat::BC1_UNORM, 256, 256, p);   // 8B blocks
+            roundtrip(DxgiFormat::R8G8B8A8_UNORM, 64, 64, p);// 4B blocks
+            roundtrip(DxgiFormat::R8G8B8A8_UNORM, 50, 50, p);// unpadded: needs the fix above
+            roundtrip(DxgiFormat::ASTC_5X5_UNORM, 100, 100, p);
+        }
+    }
 
     #[test]
     fn ps4_roundtrip_bc7() {
