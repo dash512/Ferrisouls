@@ -387,6 +387,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "writes files"]
     fn full_layout_test() {
         unsafe { crate::oodle::auto_oodle() };
 

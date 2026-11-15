@@ -72,6 +72,7 @@ pub struct BinaryReader<'a> {
     pub data: Cursor<&'a [u8]>,
     pub big_endian: bool,
     pub varint_long: bool,
+    pub base_offset: u64,
 
     steps: Vec<u64>,
 }
@@ -112,6 +113,7 @@ impl<'a> BinaryReader<'a> {
             data: Cursor::new(data),
             big_endian,
             varint_long,
+            base_offset: 0,
             steps: Vec::new(),
         }
     }
@@ -126,6 +128,12 @@ impl<'a> BinaryReader<'a> {
     #[inline]
     pub fn position(&self) -> u64 {
         self.data.position()
+    }
+
+    #[inline]
+    ///Returns absolute offset by appending `self.base_offset`
+    pub fn absolute_offset(&self, offset: u64) -> u64 {
+        offset + self.base_offset
     }
 
     #[inline]
@@ -707,4 +715,5 @@ impl<'a> BinaryReader<'a> {
         self.step_out()?;
         Ok(out)
     }
+
 }

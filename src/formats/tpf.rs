@@ -355,10 +355,17 @@ impl TPFTexture {
     }
     
     ///Crops self texture in place by creating a new DDS from the given dimensions and calling `Self::replace` with it.
-    pub fn crop(&mut self, x: u16, y: u16, width: u16, height: u16) -> Result<(), FerrisoulsError> {
+    pub fn crop_in_place(&mut self, x: u16, y: u16, width: u16, height: u16) -> Result<(), FerrisoulsError> {
         let cropped = self.to_dds()?
             .crop(x, y, width, height)?;
         self.replace(cropped)
+    }
+
+    ///Returns a cropped copy of self texture in DDS format. Errors if any given dimensions
+    /// aren't divisible by 4.
+    pub fn cropped(&self, x: u16, y: u16, width: u16, height: u16) -> Result<DDS, FerrisoulsError> {
+        self.to_dds()?
+            .crop(x, y, width, height)
     }
 
     /// ## Safety:
@@ -762,9 +769,8 @@ impl std::fmt::Display for TPF {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-use super::*;
+    use std::{error::Error, path::Path};
+    use super::*;
 
     #[test]
     fn platform_byte_order() {
@@ -773,6 +779,7 @@ use super::*;
     }
 
     #[test]
+    #[ignore = "writes files"]
     fn write_texture() {
         unsafe {crate::oodle::auto_oodle()};
 
@@ -785,6 +792,7 @@ use super::*;
     }
 
     #[test]
+    #[ignore = "writes files"]
     fn inspct_tpf() {
         unsafe {crate::oodle::auto_oodle()};
 
@@ -818,5 +826,20 @@ use super::*;
          */
     }
 
+    #[test]
+    #[ignore = "writes files"]
+    fn fetch_single_icon() -> Result<(), Box<dyn Error>> {
+        unsafe {crate::oodle::auto_oodle()};
+
+        let (tpf, dt) = unsafe {
+            TPF::read(Path::new("tests/ds3/01_common.tpf.dcx"))?
+        };
+
+        tpf.find(String::from("MENU_Icon_00001")).unwrap()
+           .cropped(480, 640, 160, 160)?
+           .to_file(Path::new("C:/Users/lstr/Downloads/Estus_Shard.dds"))?;
+
+        Ok(())  
+    }
 }
 

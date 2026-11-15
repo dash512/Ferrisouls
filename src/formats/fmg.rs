@@ -434,6 +434,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "writes files"]
     fn test_msg() {
         unsafe { crate::oodle::auto_oodle(); }
 

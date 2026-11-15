@@ -41,6 +41,7 @@ pub trait IO {
         )?)
     }
 
+    ///Builds self from an uncompressed file. If the file is DCX compressed, use `Self::read()` instead.
     fn from_file(mut path: &Path) -> Result<Self, BinaryReaderError>
     where Self: Sized {
         let mut data = std::fs::read(path)?;
