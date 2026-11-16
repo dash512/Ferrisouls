@@ -13,7 +13,7 @@ use crate::errors::{BinaryReaderError, BinaryWriterError};
 use crate::games::Game;
 use crate::oodle::OodleSettings;
 
-use super::{BinderFlags, BinderVersion, hash_table::BinderHashTable};
+use super::{BinderFlags, hash_table::BinderHashTable};
 use super::bnd4::{BND4Entry, BND4EntryHeader, BND4Header};
 
 
@@ -455,7 +455,6 @@ impl SplitIO for BXF4 {
 }
 
 impl Binder for BXF4 {
-    const VERSION: BinderVersion = BinderVersion::V1;
     type Entry = BND4Entry;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }

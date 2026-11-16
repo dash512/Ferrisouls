@@ -11,7 +11,7 @@ use crate::binders::{Binder, BinderEntry};
 use crate::dcx::{Compress, CompressSettings, DCXType, Decompress};
 use crate::errors::{BinaryReaderError, BinaryWriterError};
 use crate::oodle::OodleSettings;
-use super::{BinderFlags, BinderVersion, EntryFlags};
+use super::{BinderFlags, EntryFlags};
 
 
 ///BDF3 header (0x10 bytes) at the start of the data file.
@@ -367,7 +367,6 @@ impl SplitIO for BXF3 {
 }
 
 impl Binder for BXF3 {
-    const VERSION: BinderVersion = BinderVersion::V3;
     type Entry = BXF3Entry;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }

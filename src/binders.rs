@@ -5,10 +5,7 @@ use std::{cmp::Ordering, path::Path};
 use bitflags::bitflags;
 use regex::Regex;
 use crate::binary::{BinaryReader, BinaryWriter, IO};
-use crate::binders::{bnd4::{BND4, BND4EntryHeader, BND4Header}, identifiers::Identifier};
 use crate::dcx::{self, DCXType};
-use crate::binary::misc::VariableUInt;
-use crate::binders::bnd4::BND4Entry;
 use crate::errors::{FerrisoulsError, BinaryReaderError, BinaryWriterError};
 
 pub mod bnd;
@@ -18,7 +15,6 @@ pub mod bnd4;
 pub mod bxf3;
 pub mod bxf4;
 pub mod hash_table;
-
 
 pub enum BinderVersion {
     V1, // used in very old games such as Metal Wolf Chaos
@@ -265,7 +261,7 @@ pub mod identifiers {
         f32, f64,
     );
 }
-
+pub use identifiers::Identifier;
 
 
 /// This trait allows for basic handling of entries within any Binder that implements it.
@@ -273,7 +269,6 @@ pub mod identifiers {
 /// Expects a BinderVersion, and an `Entry` type corresponding to the entries/files stored in this Binder.
 /// 
 pub trait Binder {
-    const VERSION: BinderVersion; // BinderVersion
     type Entry: BinderEntry; 
 
     fn entries(&self) -> &Vec<Self::Entry>;

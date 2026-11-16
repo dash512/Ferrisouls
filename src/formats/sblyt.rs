@@ -35,9 +35,8 @@ use std::path::Path;
 use std::fmt::Write;
 
 use crate::binary::{BinaryReader, BinaryWriter, IO};
-use crate::binders::BinderFlags;
-use crate::binders::bnd4::{BND4Entry, BND4EntryHeader, BND4Header};
-use crate::binders::{Binder, BinderEntry, BinderVersion, bnd4::BND4};
+use crate::binders::bnd4::{BND4, BND4Entry, BND4EntryHeader, BND4Header};
+use crate::binders::{Binder, BinderEntry};
 use crate::dcx::DCXType;
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 use crate::games::Game;
@@ -157,7 +156,6 @@ pub struct Layout {
 }
 
 impl Binder for Layout {
-    const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = Subtexture;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
@@ -307,7 +305,6 @@ pub struct LayoutBinder {
 }
 
 impl Binder for LayoutBinder {
-    const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = Layout;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }

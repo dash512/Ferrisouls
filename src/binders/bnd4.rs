@@ -7,7 +7,7 @@ use crate::errors::{BinaryReaderError, BinaryWriterError};
 use crate::games::Game;
 use crate::binary::{BinaryReader, BinaryWriter, misc::VariableUInt};
 use crate::oodle::OodleSettings;
-use super::{BinderFlags, BinderVersion, EntryFlags, FerrisoulsError, hash_table::BinderHashTable};
+use super::{BinderFlags, EntryFlags, FerrisoulsError, hash_table::BinderHashTable};
 
 
 #[derive(Debug, Clone, Default)]
@@ -463,7 +463,6 @@ impl IO for BND4 {
 }
 
 impl Binder for BND4 {
-    const VERSION: BinderVersion = BinderVersion::V1;
     type Entry = BND4Entry;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }

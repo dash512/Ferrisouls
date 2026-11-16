@@ -3,6 +3,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::ops::{Deref, DerefMut};
 
+use crate::binders::{Binder, BinderEntry};
 use crate::{binary::{BinaryReader, BinaryWriter}, errors::{BinaryReaderError, BinaryWriterError}};
 use super::{control::Control, shape::Shape};
 
@@ -72,6 +73,11 @@ impl Dlgo {
     }
 }
 
+impl BinderEntry for Dlgo {
+    type Identifier = String;
+    fn identity(&self) -> &Self::Identifier { &self.name }
+}
+
 
 ///A group of UI elements, which is itself a UI element.
 #[derive(Debug)]
@@ -91,6 +97,13 @@ pub struct Dlg {
     pub unk3a: i16,
     /// Always 0.
     pub unk3c: i32,
+}
+
+impl Binder for Dlg {
+    type Entry = Dlgo;
+    
+    fn entries(&self) -> &Vec<Self::Entry> { &self.dlgos }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.dlgos }
 }
 
 impl Default for Dlg {

@@ -10,7 +10,7 @@ use std::rc::Rc;
 use bitflags::bitflags;
 
 use crate::binary::{BinaryReader, BinaryWriter, IO};
-use crate::binders::{Binder, BinderEntry, BinderVersion};
+use crate::binders::{Binder, BinderEntry};
 use crate::binders::bnd4::{BND4, BND4Entry, BND4EntryHeader, BND4Header};
 use crate::dcx::{Compress, Decompress, CompressSettings, DCXType};
 use crate::errors::{BinaryReaderError, BinaryWriterError};
@@ -476,7 +476,6 @@ impl IO for ParamBND {
 }
 
 impl Binder for ParamBND {
-    const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = Param;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }

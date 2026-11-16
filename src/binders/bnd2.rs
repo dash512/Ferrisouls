@@ -2,7 +2,7 @@
 //!
 //! MWC, Another Century's Episode 2, Armored Core: FF, AC: 9B, AC: LR. typically psp/ps2 games 
 
-use crate::{binary::{BinaryReader, BinaryWriter, IO}, binders::{Binder, BinderEntry, BinderVersion}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
+use crate::{binary::{BinaryReader, BinaryWriter, IO}, binders::{Binder, BinderEntry}, errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError}};
 use bitflags::{bitflags, parser::to_writer};
 
 
@@ -462,7 +462,6 @@ impl IO for BND2 {
 }
 
 impl Binder for BND2 {
-    const VERSION: BinderVersion = BinderVersion::V2;
     type Entry = BND2Entry;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }

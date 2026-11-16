@@ -3,13 +3,10 @@
 use std::io::Write;
 use std::path::Path;
 
-use crate::binary::{BinaryReader, BinaryWriter, IO, misc::ByteOrder};
-use crate::binders::bnd4::BND4Header;
-use crate::binders::{Binder, BinderEntry, BinderVersion};
-use crate::dcx::{Compress, CompressSettings, DCXType};
-use crate::dcx::{DCXType::DCP_EDGE, Decompress};
+use crate::binary::{BinaryReader, BinaryWriter, IO};
+use crate::binders::{Binder, BinderEntry};
+use crate::dcx::{Compress, CompressSettings, DCXType, DCXType::DCP_EDGE, Decompress};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
-use crate::oodle::OodleSettings;
 use crate::textures::dds::{AlphaMode, D3D10ResourceDimension, DDS, DDSCAPS2, DX10Header, ResourceMisc};
 use crate::textures::headerizer;
 use crate::textures::ktx2::KTX2;
@@ -745,7 +742,6 @@ impl IO for TPF {
 }
 
 impl Binder for TPF {
-    const VERSION: BinderVersion = BinderVersion::VARIABLE; // can be 3 or 4. TODO: is this correct?
     type Entry = TPFTexture;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.textures }

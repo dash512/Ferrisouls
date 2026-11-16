@@ -2,7 +2,7 @@
 
 use super::{BinderFlags, EntryFlags};
 use crate::binary::{IO, BinaryReader, BinaryWriter, misc::VariableUInt};
-use crate::binders::{Binder, BinderEntry, BinderVersion};
+use crate::binders::{Binder, BinderEntry};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 
 
@@ -299,7 +299,6 @@ impl IO for BND3 {
 }
 
 impl Binder for BND3 {
-    const VERSION: BinderVersion = BinderVersion::V1;
     type Entry = BND3Entry;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }

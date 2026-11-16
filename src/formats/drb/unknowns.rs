@@ -1,6 +1,9 @@
 //! Unknown/unused structs within DRB files: anik, anio, anim, scdk, scdo, scdl.
 
-use crate::{binary::{BinaryReader, BinaryWriter, IO}, errors::{BinaryReaderError, BinaryWriterError}, formats::drb::DRBVersion};
+use crate::binary::{BinaryReader, BinaryWriter, IO};
+use crate::binders::{Binder, BinderEntry};
+use crate::errors::{BinaryReaderError, BinaryWriterError};
+use super::DRBVersion;
 
 pub const ANIK_SIZE: u32 = 0x20;
 pub const ANIO_SIZE: u32 = 0x10;
@@ -63,7 +66,14 @@ impl IO for Anik {
     }
 }
 
+impl BinderEntry for Anik {
+    type Identifier = String;
+    fn identity(&self) -> &Self::Identifier { &self.name }
+}
+
+
 #[derive(Debug, Default)]
+///Anios do not have an identity and thus functions such as `Anim::find()` will never match.
 pub struct Anio {
     pub unk00: u32,
     pub unk0c: u32,
@@ -96,7 +106,21 @@ impl Anio {
     }
 }
 
+impl BinderEntry for Anio {
+    type Identifier = Option<String>;
+    fn identity(&self) -> &Self::Identifier { &None }
+}
+
+impl Binder for Anio {
+    type Entry = Anik;
+    
+    fn entries(&self) -> &Vec<Self::Entry> { &self.aniks }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.aniks }
+}
+
+
 #[derive(Debug, Default)]
+///Anios do not have an identity and thus functions such as `Anim::find()` will never match.
 pub struct Anim {
     pub name: String,
     pub name_offset: u32,
@@ -164,6 +188,14 @@ impl Anim {
     }
 }
 
+impl Binder for Anim {
+    type Entry = Anio;
+    
+    fn entries(&self) -> &Vec<Self::Entry> { &self.anios }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.anios }
+}
+
+
 #[derive(Debug, Default)]
 pub struct Scdk {
     pub name: String,
@@ -220,6 +252,12 @@ impl Scdk {
     }
 }
 
+impl BinderEntry for Scdk {
+    type Identifier = String;
+    fn identity(&self) -> &Self::Identifier { &self.name }
+}
+
+
 #[derive(Debug, Default)]
 pub struct Scdo {
     pub name: String,
@@ -253,6 +291,19 @@ impl Scdo {
     }
 }
 
+impl BinderEntry for Scdo {
+    type Identifier = String;
+    fn identity(&self) -> &Self::Identifier { &self.name }
+}
+
+impl Binder for Scdo {
+    type Entry = Scdk;
+    
+    fn entries(&self) -> &Vec<Self::Entry> { &self.scdks }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.scdks }
+}
+
+
 #[derive(Debug, Default)]
 pub struct Scdl {
     pub name: String,
@@ -284,5 +335,12 @@ impl Scdl {
         writer.write_u32(scdo_offset)?;
         writer.write_u32(self.unk0c)
     }
+}
+
+impl Binder for Scdl {
+    type Entry = Scdo;
+    
+    fn entries(&self) -> &Vec<Self::Entry> { &self.scdos }
+    fn entries_mut(&mut self) -> &mut Vec<Self::Entry> { &mut self.scdos }
 }
 

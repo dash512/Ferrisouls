@@ -11,9 +11,8 @@ use std::{collections::HashMap, ops::Index, path::Path};
 use bitflags::Flags;
 
 use crate::binary::{BinaryReader, BinaryWriter, IO};
-use crate::binders::bnd4::BND4EntryHeader;
-use crate::binders::{Binder, BinderEntry, BinderFlags, BinderVersion, bnd4::{BND4, BND4Entry, BND4Header}};
-use crate::dcx::DCXType;
+use crate::binders::{Binder, BinderEntry};
+use crate::binders::bnd4::{BND4, BND4Entry, BND4EntryHeader, BND4Header};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
 
 
@@ -347,7 +346,6 @@ impl IO for FMG {
 }
 
 impl Binder for FMG {
-    const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = FMGEntry;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }
@@ -406,7 +404,6 @@ impl IO for FMGBinder {
 }
 
 impl Binder for FMGBinder {
-    const VERSION: BinderVersion = BinderVersion::V4;
     type Entry = FMG;
 
     fn entries(&self) -> &Vec<Self::Entry> { &self.entries }

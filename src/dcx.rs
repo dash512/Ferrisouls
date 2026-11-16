@@ -15,7 +15,6 @@ use flate2::Compression as ZCompression;
 use crate::errors::{BinaryReaderError, DCXError, FerrisoulsError};
 use crate::oodle::{self, Oodle, Oodle26, Oodle28, Oodle29, OodleType, OodleSettings};
 use crate::binary::{BinaryReader, BinaryWriter, IO};
-use crate::binary::misc::ByteOrder;
 
 pub use header_structs::*;
 
