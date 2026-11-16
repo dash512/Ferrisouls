@@ -9,10 +9,10 @@ use std::path::Path;
 use std::rc::Rc;
 use bitflags::bitflags;
 
-use crate::binary::{BinaryReader, BinaryWriter, IO, decompress_if_needed};
+use crate::binary::{BinaryReader, BinaryWriter, IO};
 use crate::binders::{Binder, BinderEntry, BinderVersion};
 use crate::binders::bnd4::{BND4, BND4Entry, BND4EntryHeader, BND4Header};
-use crate::dcx::{Compress, CompressSettings, DCXType};
+use crate::dcx::{Compress, Decompress, CompressSettings, DCXType};
 use crate::errors::{BinaryReaderError, BinaryWriterError};
 use crate::errors::FerrisoulsError;
 use crate::formats::param::row::{self, Row};

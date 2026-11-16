@@ -2,7 +2,9 @@
 
 use std::{collections::{HashMap, VecDeque}, fs::File, io::Write, path::Path};
 
-use crate::{binary::{BinaryReader, BinaryWriter, IO, decompress_if_needed}, dcx::{Compress, CompressSettings, DCXType}, errors::{BinaryReaderError, BinaryWriterError}};
+use crate::binary::{BinaryReader, BinaryWriter, IO};
+use crate::dcx::{Compress, Decompress, CompressSettings, DCXType};
+use crate::errors::{BinaryReaderError, BinaryWriterError};
 use self::{
     control::Control,
     dlg::{Dlg, Dlgo},
@@ -173,7 +175,7 @@ impl DRB {
 
     pub unsafe fn read(path: &Path, version: DRBVersion) -> Result<(Self, DCXType), BinaryReaderError> {
         let data = std::fs::read(path)?;
-        let (bytes, dt) = unsafe { decompress_if_needed(&data) }?;
+        let (bytes, dt) = unsafe { Decompress::raw(&data) }?;
         Ok((Self::from_bytes(&bytes, version)?, dt))
     }
         

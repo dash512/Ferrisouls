@@ -464,7 +464,7 @@ pub trait BinderEntry {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
-    use crate::{binary::decompress_if_needed, binders::bnd4::BND4, oodle::init_oodle};
+    use crate::{dcx::Decompress, binders::bnd4::BND4, oodle::init_oodle};
     use super::*;
 
     #[test]
@@ -481,7 +481,7 @@ mod tests {
     fn test_real_flags() {
         unsafe { init_oodle(Path::new("tests/oo2core_6_win64.dll")) };
         let data = std::fs::read("tests/01_common.sblytbnd.dcx").unwrap();
-        let (bytes, _) = unsafe { decompress_if_needed(&data) }.unwrap();
+        let (bytes, _) = unsafe { Decompress::raw(&data) }.unwrap();
         println!("original: unicode={:02X} flags={:02X} extended={:02X}", bytes[0x30], bytes[0x31], bytes[0x32]);
 
         let (mut bnd, _) = unsafe { BND4::read(Path::new("tests/01_common.sblytbnd.dcx")) }.unwrap();

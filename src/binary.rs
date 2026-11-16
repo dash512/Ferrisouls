@@ -13,17 +13,8 @@ use zstd::zstd_safe::WriteBuf;
 use crate::binders::bnd4::BND4;
 use crate::dcx::{Compress, CompressSettings, DCXType, Decompress};
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
-use std::{borrow::Cow, fs::File, io::{Read, Write}, path::Path};
+use std::{fs::File, io::{Read, Write}, path::Path};
 
-/// Decompresses `data` if it starts with a DCX/DCP magic, otherwise borrows it unchanged.
-pub unsafe fn decompress_if_needed(data: &[u8]) -> Result<(Cow<'_, [u8]>, DCXType), FerrisoulsError> {
-    if data.starts_with(b"DCX\0") || data.starts_with(b"DCP\0") {
-        let (decompressed, dt) = unsafe { Decompress::raw(data) }?;
-        Ok((Cow::Owned(decompressed), dt))
-    } else {
-        Ok((Cow::Borrowed(data), DCXType::Null))
-    }
-}
 
 pub trait IO {
     //Read
@@ -59,7 +50,7 @@ pub trait IO {
     unsafe fn read(path: &Path) -> Result<(Self, DCXType), BinaryReaderError>
     where Self: Sized {
         let data = std::fs::read(path)?;
-        let (bytes, dt) = unsafe { decompress_if_needed(&data) }?;
+        let (bytes, dt) = unsafe { Decompress::raw(&data) }?;
         Ok((Self::from_bytes(&bytes)?, dt))
     }
 
@@ -149,8 +140,8 @@ pub trait SplitIO {
         let bhd_data = std::fs::read(bhd_path)?;
         let bdt_data = std::fs::read(bdt_path)?;
 
-        let (bhd_bytes, bhd_dt) = unsafe { decompress_if_needed(&bhd_data) }?;
-        let (bdt_bytes, bdt_dt) = unsafe { decompress_if_needed(&bdt_data) }?;
+        let (bhd_bytes, bhd_dt) = unsafe { Decompress::raw(&bhd_data) }?;
+        let (bdt_bytes, bdt_dt) = unsafe { Decompress::raw(&bdt_data) }?;
 
         Ok((Self::from_bytes(&bhd_bytes, &bdt_bytes)?, bhd_dt, bdt_dt))
     }
