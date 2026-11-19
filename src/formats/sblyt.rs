@@ -148,8 +148,8 @@ pub struct Layout {
     pub name: String,
     pub image_path: String,
 
-    pub width: Option<u16>,
-    pub height: Option<u16>,
+    pub width: u16,
+    pub height: u16,
     pub root_dimensions: bool, // whether to write atlas dimensions to the TextureAtlas xml root; used in NR
 
     pub entries: Vec<Subtexture>
@@ -201,12 +201,12 @@ impl Layout {
         match root.attribute("width") {
             Some(w) => {
                 let width = root.attribute("width")
-                    .map(|w| w.trim().parse::<u16>())
-                    .transpose()?;
+                    .map(|w|w.trim().parse::<u16>().unwrap())
+                    .unwrap_or_default();
                 let height = root.attribute("height")
-                    .map(|h| h.trim().parse::<u16>())
-                    .transpose()?;
-                let root_dimensions = width.is_some() || height.is_some();
+                    .map(|w|w.trim().parse::<u16>().unwrap())
+                    .unwrap_or_default();
+                let root_dimensions = width > 0 || height > 0;
 
                 Ok(Self {
                     _header: header,
@@ -223,8 +223,8 @@ impl Layout {
                     _header: header,
                     name: name.unwrap(),
                     image_path,
-                    width: None,
-                    height: None,
+                    width: 0,
+                    height: 0,
                     root_dimensions: false,
                     entries: subs
                 })
@@ -263,12 +263,8 @@ impl Layout {
         w.write_attribute("imagePath", &self.image_path);
 
         if self.root_dimensions {
-            if let Some(width) = self.width {
-                w.write_attribute("width", &width);
-            }
-            if let Some(height) = self.height {
-                w.write_attribute("height", &height);
-            }
+            w.write_attribute("width", &self.width);
+            w.write_attribute("height", &self.height);
         }
 
         for sub in &self.entries {
@@ -289,7 +285,7 @@ impl Layout {
 impl std::fmt::Display for Layout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 
-        write!(f, "Layout[Name: {:?} | Path: {} | Dimensions: {:?}x{:?} | Entries: {}]\n",
+        write!(f, "Layout[Name: {:?} | Path: {} | Dimensions: {:?}x{:?} | Entries: {}]",
             self.name, self.image_path, self.width, self.height, self.entries.len()
         )
     }

@@ -592,7 +592,7 @@ impl std::fmt::Display for TPFTexture {
             Some(h) => format!("{}x{}", h.width, h.height),
             None => "Headerless".to_string()
         };
-        write!(f, "{:?}[{} | {} | Format: {} | Size: {}]\n",
+        write!(f, "{:?}[{} | {} | Format: {} | Size: {}]",
             self.texture_type, self.name, size, self.format, self.data.len()
         )
     }

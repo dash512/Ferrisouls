@@ -23,6 +23,7 @@
 
 use std::borrow::Cow;
 use std::path::Path;
+use std::io::Cursor;
 
 use crate::binary::IO;
 use crate::errors::{BinaryReaderError, BinaryWriterError, FerrisoulsError};
@@ -33,7 +34,7 @@ use crate::textures::swizzling::FormatLayout;
 
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
     RGBA,
     DDS(DxgiFormat),
@@ -1005,39 +1006,39 @@ pub fn crop_dds(dds: &DDS, x: u16, y: u16, width: u16, height: u16) -> Result<DD
 }
 
 ///A decently efficient function to crop a TGA image from its raw bytes. 
-pub fn crop_tga(src: &[u8], x: usize, y: usize, w: usize, h: usize) -> Option<Vec<u8>> {
+pub fn crop_tga(src: &[u8], x: u16, y: u16, w: u16, h: u16) -> Result<Vec<u8>, FerrisoulsError> {
     if src.len() < 18 {
-        return None;
+        return Err("TGA bytes are not long enough.".into());
     }
 
-    let id_len = src[0] as usize;
+    let id_len = src[0] as u16;
     let color_map_type = src[1];
     let image_type = src[2];
 
     //only handle uncompressed true-color format
     if color_map_type != 0 || image_type != 2 {
-        return None;
+        return Err("Unsupported TGA color type".into());
     }
 
-    let src_w = u16::from_le_bytes([src[12], src[13]]) as usize;
-    let src_h = u16::from_le_bytes([src[14], src[15]]) as usize;
+    let src_w = u16::from_le_bytes([src[12], src[13]]);
+    let src_h = u16::from_le_bytes([src[14], src[15]]);
     let bpp = src[16];
 
     if bpp != 24 && bpp != 32 {
-        return None;
+        return Err("Invalid TGA bpp.".into());
     }
 
-    let bytes_per_pixel = (bpp / 8) as usize;
+    let bytes_per_pixel = (bpp / 8) as u16;
     let data_offset = 18 + id_len;
 
     if x + w > src_w || y + h > src_h {
-        return None;
+        return Err("Invalid TGA dimensions.".into());
     }
 
     let src_stride = src_w * bytes_per_pixel;
     let dst_stride = w * bytes_per_pixel;
 
-    let mut out = vec![0u8; 18 + h * dst_stride];
+    let mut out = vec![0u8; (18 + h * dst_stride) as usize];
 
     //header
     out[2] = 2; // type
@@ -1049,14 +1050,65 @@ pub fn crop_tga(src: &[u8], x: usize, y: usize, w: usize, h: usize) -> Option<Ve
     out[17] = src[17] & 0x30;
 
     for row in 0..h {
-        let src_start = data_offset + (y + row) * src_stride + x * bytes_per_pixel;
-        let dst_start = 18 + row * dst_stride;
+        let src_start = (data_offset + (y + row) * src_stride + x * bytes_per_pixel) as usize;
+        let dst_start = (18 + row * dst_stride) as usize;
 
-        out[dst_start..dst_start + dst_stride]
-            .copy_from_slice(&src[src_start..src_start + dst_stride]);
+        out[dst_start..dst_start + dst_stride as usize]
+            .copy_from_slice(&src[src_start..src_start + dst_stride as usize]);
     }
 
-    Some(out)
+    Ok(out)
+}
+
+pub fn crop_png(input: &[u8], x: u16, y: u16, width: u16, height: u16) -> Result<Vec<u8>, FerrisoulsError> {
+    let decoder = png::Decoder::new(Cursor::new(input));
+    let mut reader = decoder.read_info().map_err(BinaryReaderError::PngDecode)?;
+
+    let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut buf).map_err(BinaryReaderError::PngDecode)?;
+    let bytes = &buf[..info.buffer_size()];
+
+    let channels = match info.color_type {
+        png::ColorType::Grayscale => 1,
+        png::ColorType::GrayscaleAlpha => 2,
+        png::ColorType::Rgb => 3,
+        png::ColorType::Rgba => 4,
+        png::ColorType::Indexed => {
+            return Err("Indexed PNG needs palette handling".into());
+        }
+    };
+
+    if x + width > info.width as u16 || y + height > info.height as u16 {
+        return Err("Crop rectangle is outside image".into());
+    }
+
+    let src_stride = info.width as usize * channels;
+    let dst_stride = width as usize * channels;
+
+    let mut cropped = vec![0u8; height as usize * dst_stride];
+
+    for row in 0..height as usize {
+        let src_start = (y as usize + row) * src_stride
+            + x as usize * channels;
+        let dst_start = row * dst_stride;
+
+        cropped[dst_start..dst_start + dst_stride]
+            .copy_from_slice(&bytes[src_start..src_start + dst_stride]);
+    }
+
+    let mut output = Vec::new();
+
+    {
+        let mut encoder = png::Encoder::new(&mut output, width as u32, height as u32);
+
+        encoder.set_color(info.color_type);
+        encoder.set_depth(info.bit_depth);
+
+        let mut writer = encoder.write_header().map_err(BinaryWriterError::PngEncode)?;
+        writer.write_image_data(&cropped).map_err(BinaryWriterError::PngEncode)?;
+    }
+
+    Ok(output)
 }
 
 //-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-.-

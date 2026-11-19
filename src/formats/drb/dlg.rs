@@ -30,7 +30,7 @@ pub struct Dlgo {
 
 impl Dlgo {
     /// `shapes` and `controls` are keyed by block-relative offset. Entries are removed as they're claimed.
-    pub fn from_reader(reader: &mut BinaryReader, shapes: &mut HashMap<u32, Shape>, controls: &mut HashMap<u32, Control>) -> Result<Self, BinaryReaderError> {
+    pub fn from_reader(reader: &mut BinaryReader, str_start: u64, shapes: &mut HashMap<u32, Shape>, controls: &mut HashMap<u32, Control>) -> Result<Self, BinaryReaderError> {
         let name_offset = reader.read_u32()?;
         let shap_offset = reader.read_u32()?;
         let ctrl_offset = reader.read_u32()?;
@@ -40,7 +40,7 @@ impl Dlgo {
         let unk18 = reader.read_i32()?;
         let unk1c = reader.read_i32()?;
 
-        let name = reader.get_utf16(name_offset as u64)?;
+        let name = reader.get_utf16(str_start + name_offset as u64)?;
         let shape = shapes
             .remove(&shap_offset)
             .ok_or_else(|| format!("No shape at SHAP offset {shap_offset:#X} for \"{name}\""))?;
@@ -140,8 +140,8 @@ impl Dlg {
     }
 
     ///`dlgos` is keyed by block-relative offset. Children are removed as they're claimed.
-    pub fn from_reader(reader: &mut BinaryReader, shapes: &mut HashMap<u32, Shape>, controls: &mut HashMap<u32, Control>, dlgos: &mut HashMap<u32, Dlgo>) -> Result<Self, BinaryReaderError> {
-        let base = Dlgo::from_reader(reader, shapes, controls)?;
+    pub fn from_reader(reader: &mut BinaryReader, str_start: u64, shapes: &mut HashMap<u32, Shape>, controls: &mut HashMap<u32, Control>, dlgos: &mut HashMap<u32, Dlgo>) -> Result<Self, BinaryReaderError> {
+        let base = Dlgo::from_reader(reader, str_start, shapes, controls)?;
 
         let dlgo_count = reader.read_i32()?;
         let dlgo_offset = reader.read_i32()?;

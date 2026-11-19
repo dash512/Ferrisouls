@@ -363,7 +363,7 @@ impl BinderEntry for FMG {
 impl std::fmt::Display for FMG {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 
-        write!(f, "FMG[Name: {:?} | Version: {:?} | Big Endian: {} | Unicode: {} | Entries: {}]\n",
+        write!(f, "FMG[Name: {:?} | Version: {:?} | Big Endian: {} | Unicode: {} | Entries: {}]",
             self.name, self.version, self.big_endian, self.unicode, self.entries.len()
         )
     }

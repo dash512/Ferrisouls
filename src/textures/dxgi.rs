@@ -11,7 +11,7 @@
 use crate::errors::FerrisoulsError::{self, FormatNotFound};
 
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatInfo {
     Linear {
         bits_per_texel: u8, // logical/storage bits per texel
@@ -77,7 +77,7 @@ impl FormatInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DxgiFormat {
     name: &'static str,
     value: u8, // dxgi ID as per microsoft

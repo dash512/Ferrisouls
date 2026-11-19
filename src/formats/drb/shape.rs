@@ -172,20 +172,20 @@ impl TxtType {
 ///Describes the appearance of a UI element.
 #[derive(Debug, Default)]
 pub struct Shape {
-    shape_type: ShapeType,
-    type_offset: u32,
+    pub shape_type: ShapeType,
+    pub type_offset: u32,
 
-    shpr_offset: u32,
+    pub shpr_offset: u32,
 
-    left_edge: u16,
-    top_edge: u16,
-    right_edge: u16,
-    bottom_edge: u16,
+    pub left_edge: u16,
+    pub top_edge: u16,
+    pub right_edge: u16,
+    pub bottom_edge: u16,
 
-    origin_x: i16,
-    origin_y: i16,
+    pub origin_x: i16,
+    pub origin_y: i16,
 
-    scaling_mode: u16,
+    pub scaling_mode: u16,
 
     /// Type-specific data.
     pub body: ShapeBody,

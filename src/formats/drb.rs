@@ -2,7 +2,7 @@
 
 use std::{collections::{HashMap, VecDeque}, fs::File, io::Write, path::Path};
 
-use crate::binary::{BinaryReader, BinaryWriter, IO};
+use crate::{binary::{BinaryReader, BinaryWriter, IO}, formats::sblyt::{Layout, Subtexture}};
 use crate::dcx::{Compress, Decompress, CompressSettings, DCXType};
 use crate::errors::{BinaryReaderError, BinaryWriterError};
 use self::{
@@ -130,19 +130,19 @@ impl DRB {
         let anik_start = skip_block(reader, "ANIK")?;
         let anio_start = skip_block(reader, "ANIO")?;
         let anims = read_list_block(reader, "ANIM", |r| 
-            Anim::from_reader(r, anio_start, anik_start, version)
+            Anim::from_reader(r, anio_start, anik_start, str_start, version)
         )?;
         let scdk_start = skip_block(reader, "SCDK")?;
         let scdo_start = skip_block(reader, "SCDO")?;
         let scdls = read_list_block(reader, "SCDL", |r| 
-            Scdl::from_reader(r, scdo_start, scdk_start, scdp_start)
+            Scdl::from_reader(r, scdo_start, scdk_start, scdp_start, str_start)
         )?;
 
         let mut dlgos: HashMap<u32, Dlgo> = read_keyed_block(reader, "DLGO", |r| 
-            Dlgo::from_reader(r, &mut shapes, &mut controls)
+            Dlgo::from_reader(r, str_start, &mut shapes, &mut controls)
         )?;
         let dlgs = read_list_block(reader, "DLG\0", |r| 
-            Dlg::from_reader(r, &mut shapes, &mut controls, &mut dlgos)
+            Dlg::from_reader(r, str_start, &mut shapes, &mut controls, &mut dlgos)
         )?;
 
         read_null_block(reader, "END\0")?;
@@ -394,11 +394,43 @@ impl DRB {
 
         Ok(())
     }
+
+    ///Creates a fake SBLYT from self Dlgs.
+    pub fn to_layouts(&self) -> Vec<Layout> {
+        let mut output = Vec::with_capacity(self.dlgs.len());
+
+        for dlg in &self.dlgs {
+            let shape = &dlg.shape; // Deref to base
+
+            let mut lyt = Layout {
+                name: dlg.name.clone(),
+                width: shape.right_edge.saturating_sub(shape.left_edge),
+                height: shape.bottom_edge.saturating_sub(shape.top_edge),
+                ..Default::default()
+            };
+
+            for dlgo in &dlg.dlgos {
+                let s = &dlgo.shape;
+                lyt.entries.push(Subtexture {
+                    name: dlgo.name.clone(),
+                    x: s.left_edge,
+                    y: s.top_edge,
+                    width: s.right_edge.saturating_sub(s.left_edge),
+                    height: s.bottom_edge.saturating_sub(s.top_edge),
+                    ..Default::default()
+                });
+            }
+
+            output.push(lyt);
+        }
+
+        output
+    }
 }
 
 impl std::fmt::Display for DRB {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "DRB[Version: {:?} | BE: {:?} Anims: {} | Scdls: {} | Dlgs: {}, Textures: {}]", 
+        write!(f, "DRB[Version: {:?} | BE: {:?} | Anims: {} | Scdls: {} | Dlgs: {}, Textures: {}]", 
             self.version, self.big_endian, self.anims.len(), self.scdls.len(), self.dlgs.len(), self.textures.len()
         );
         Ok(())
@@ -549,5 +581,9 @@ mod tests {
         }.unwrap();
 
         println!("{}", drb);
+        for d in drb.textures {
+            println!("{:?}", d);
+        }
+        
     }
 }

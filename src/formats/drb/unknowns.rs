@@ -31,12 +31,10 @@ impl Anik {
     pub fn new() -> Self {
         Self { unk04: 1, unk09: 2, ..Default::default() }
     }
-}
 
-impl IO for Anik {
-    fn from_reader(reader: &mut BinaryReader) -> Result<Self, BinaryReaderError> {
+    pub fn from_reader(reader: &mut BinaryReader, str_start: u64) -> Result<Self, BinaryReaderError> {
         let name_offset = reader.read_u32()?;
-        let name = reader.get_utf16(name_offset as u64)?;
+        let name = reader.get_utf16(str_start + name_offset as u64)?;
         Ok(Self {
             name,
             name_offset,
@@ -52,7 +50,7 @@ impl IO for Anik {
         })
     }
 
-    fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
+    pub fn to_writer(&mut self, writer: &mut BinaryWriter) -> Result<(), BinaryWriterError> {
         writer.write_u32(self.name_offset)?;
         writer.write_u32(self.unk04)?;
         writer.write_u8(self.unk08)?;
@@ -82,7 +80,7 @@ pub struct Anio {
 
 impl Anio {
     /// `anik_start` is the absolute position of the ANIK block's data.
-    pub fn from_reader(reader: &mut BinaryReader, anik_start: u64) -> Result<Self, BinaryReaderError> {
+    pub fn from_reader(reader: &mut BinaryReader, anik_start: u64, str_start: u64) -> Result<Self, BinaryReaderError> {
         let unk00 = reader.read_u32()?;
         let anik_count = reader.read_u32()?;
         let anik_offset = reader.read_u32()?;
@@ -91,7 +89,7 @@ impl Anio {
         let mut aniks = Vec::with_capacity(anik_count as usize);
         for i in 0..anik_count {
             reader.step_in(anik_start + (anik_offset + ANIK_SIZE * i) as u64)?;
-            aniks.push(Anik::from_reader(reader)?);
+            aniks.push(Anik::from_reader(reader, str_start)?);
             reader.step_out()?;
         }
         Ok(Self { unk00, unk0c, aniks })
@@ -141,9 +139,9 @@ impl Anim {
         Self { unk10: 4, unk14: 4, unk18: 4, unk1c: 1, ..Default::default() }
     }
 
-    pub fn from_reader(reader: &mut BinaryReader, anio_start: u64, anik_start: u64, version: DRBVersion) -> Result<Self, BinaryReaderError> {
+    pub fn from_reader(reader: &mut BinaryReader, anio_start: u64, anik_start: u64, str_start: u64, version: DRBVersion) -> Result<Self, BinaryReaderError> {
         let name_offset = reader.read_u32()?;
-        let name = reader.get_utf16(name_offset as u64)?;
+        let name = reader.get_utf16(str_start + name_offset as u64)?;
         let anio_count = reader.read_u32()?;
         let anio_offset = reader.read_u32()?;
 
@@ -162,7 +160,7 @@ impl Anim {
         let mut anios = Vec::with_capacity(anio_count as usize);
         for i in 0..anio_count {
             reader.step_in(anio_start + (anio_offset + ANIO_SIZE * i) as u64)?;
-            anios.push(Anio::from_reader(reader, anik_start)?);
+            anios.push(Anio::from_reader(reader, anik_start, str_start)?);
             reader.step_out()?;
         }
 
@@ -216,9 +214,9 @@ impl Scdk {
         Self { unk08: 1, ..Default::default() }
     }
 
-    pub fn from_reader(reader: &mut BinaryReader, scdp_start: u64) -> Result<Self, BinaryReaderError> {
+    pub fn from_reader(reader: &mut BinaryReader, scdp_start: u64, str_start: u64) -> Result<Self, BinaryReaderError> {
         let name_offset = reader.read_u32()?;
-        let name = reader.get_utf16(name_offset as u64)?;
+        let name = reader.get_utf16(str_start + name_offset as u64)?;
         let unk04 = reader.read_u32()?;
         let unk08 = reader.read_u32()?;
         let unk0c = reader.read_u32()?;
@@ -267,7 +265,7 @@ pub struct Scdo {
 }
 
 impl Scdo {
-    pub fn from_reader(reader: &mut BinaryReader, scdk_start: u64, scdp_start: u64) -> Result<Self, BinaryReaderError> {
+    pub fn from_reader(reader: &mut BinaryReader, scdk_start: u64, scdp_start: u64, str_start: u64) -> Result<Self, BinaryReaderError> {
         let name_offset = reader.read_u32()?;
         let name = reader.get_utf16(name_offset as u64)?;
         let scdk_count = reader.read_u32()?;
@@ -277,7 +275,7 @@ impl Scdo {
         let mut scdks = Vec::with_capacity(scdk_count as usize);
         for i in 0..scdk_count {
             reader.step_in(scdk_start + (scdk_offset + SCDK_SIZE * i) as u64)?;
-            scdks.push(Scdk::from_reader(reader, scdp_start)?);
+            scdks.push(Scdk::from_reader(reader, scdp_start, str_start)?);
             reader.step_out()?;
         }
         Ok(Self { name, name_offset, unk0c, scdks })
@@ -313,7 +311,7 @@ pub struct Scdl {
 }
 
 impl Scdl {
-    pub fn from_reader(reader: &mut BinaryReader, scdo_start: u64, scdk_start: u64, scdp_start: u64) -> Result<Self, BinaryReaderError> {
+    pub fn from_reader(reader: &mut BinaryReader, scdo_start: u64, scdk_start: u64, scdp_start: u64, str_start: u64) -> Result<Self, BinaryReaderError> {
         let name_offset = reader.read_u32()?;
         let name = reader.get_utf16(name_offset as u64)?;
         let scdo_count = reader.read_u32()?;
@@ -323,7 +321,7 @@ impl Scdl {
         let mut scdos = Vec::with_capacity(scdo_count as usize);
         for i in 0..scdo_count {
             reader.step_in(scdo_start + (scdo_offset + SCDO_SIZE * i) as u64)?;
-            scdos.push(Scdo::from_reader(reader, scdk_start, scdp_start)?);
+            scdos.push(Scdo::from_reader(reader, scdk_start, scdp_start, str_start)?);
             reader.step_out()?;
         }
         Ok(Self { name, name_offset, unk0c, scdos })

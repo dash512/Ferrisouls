@@ -14,7 +14,9 @@ pub mod bnd3;
 pub mod bnd4;
 pub mod bxf3;
 pub mod bxf4;
+pub mod bhd5;
 pub mod hash_table;
+
 
 pub enum BinderVersion {
     V1, // used in very old games such as Metal Wolf Chaos
