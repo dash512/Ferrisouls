@@ -26,7 +26,7 @@
 | Format | Supported |
 |---|---|
 | ACB | ⁉️ |
-| BHD5 | ⚠️ |
+| BHD5 | ✅ |
 | BND | ✅ |
 | BND2 | ✅ |
 | BND3 | ✅ |
